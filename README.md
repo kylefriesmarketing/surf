@@ -22,6 +22,24 @@ C:\Users\kylef\tools\node\node.exe surf/serve.mjs 8477     # then http://localho
 C:\Users\kylef\tools\node\node.exe test-sim.mjs
 ```
 
+## Deploy
+
+This folder **is** the repo (`kylefriesmarketing/surf`), Pages serves `main` at root,
+so there is no copy step and no hardcoded file list to forget:
+
+```bash
+git push origin main
+```
+
+`.nojekyll` is committed and is load-bearing — without it Pages runs the tree through
+Jekyll and `lib/` is at risk. Everything is static ES modules over an importmap, so
+Pages needs no build.
+
+⚠️ `__surfShot` cannot reach the shot receiver from the deployed site: the page is
+https and the receiver is plain http on :8399, so the browser blocks it as mixed
+content. Capture from the local server, verify the live build by reading its DOM and
+`__surf()` state.
+
 ---
 
 ## Status — M2 COMPLETE (2026-08-11)
