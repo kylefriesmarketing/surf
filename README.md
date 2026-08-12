@@ -5,13 +5,13 @@
 Ride a real breaking wave. Five waves to a set, each bigger than the last. Hold the
 pocket, get barrelled, and try not to let the whitewater land on your head.
 
-![riding the face](shots/surf-riding-the-face.png)
+![riding the face](shots/surf-open-face-3d.png)
 
 The water is a solved surface, not an animation: the ocean mesh is displaced every
 frame by the same function the board is riding, and the spray is ~11,000 real
 particles with gravity, drag and collision against that surface.
 
-![inside the barrel](shots/surf-barrel-cam.png)
+![inside the barrel](shots/surf-barrel-3d.png)
 
 **This file is the milestone authority. Read it before the code.**
 
@@ -42,20 +42,21 @@ content. Capture from the local server, verify the live build by reading its DOM
 
 ---
 
-## Status — M2 COMPLETE (2026-08-11)
+## Status — M3 3D REALISM PASS (2026-08-12)
 
-84/84 headless tests green, 0 GL errors, 0 console errors, ~4.4 ms/frame at
-1280×720 with ~1,000 live particles.
+111/111 headless tests green, 0 GL errors, and 0 console errors. The current frame is a full
+3D scene: ~54k triangles, a solved deforming ocean, an independent overhanging curl,
+soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 
 | System | State |
 |---|---|
 | Wave field (soliton, peeling point break) | done, 30 tests |
 | Rider (constrained-surface dynamics, rails, pump, air) | done, 30 tests |
 | Particles (mist / drops / surface foam, real solver) | done |
-| Ocean + curl rendering, backlit face, sky | done |
+| **3D ocean + overhanging curl, backlit face, atmospheric sky** | **M3** |
 | **The set — 5 escalating waves, session scoring** | **M2, 17 tests** |
 | **Manoeuvre detection (5 named tricks)** | **M2, 6 tests** |
-| **Barrel camera** | **M2** |
+| **Water-level chase + readable barrel camera** | **M3** |
 | Camera, HUD, scoring, wipeout, game over, restart | done |
 | Audio (WebAudio synth, no files) | done, **not yet heard by a human** |
 | Touch controls | written, **untested on a real device** |
@@ -140,7 +141,7 @@ surfaceAccel back to a tangent-plane projection, that test is what catches it.
 | `render.js` | ocean grid, curl ribbon, sky, board+rider rig, lights | view |
 | `game.js` | loop, input, camera, scoring, HUD, debug handles | view |
 | `sfx.js` | all audio, WebAudio synthesis, no files | view |
-| `test-sim.mjs` | 60 headless tests over wave.js + board.js | — |
+| `test-sim.mjs` | 111 headless tests across physics, breaks, AI, tricks, and tour | — |
 
 `wave.js` and `board.js` import nothing from THREE, which is why the entire ride can
 be simulated in node. **Run `node test-sim.mjs` after every change to either.**

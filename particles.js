@@ -19,20 +19,23 @@ function sprite(hard) {
   const S = 64, c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  g.translate(S / 2, S / 2);
+  // Water caught by a long lens is a narrow droplet or fleck, not a glowing orb.
+  g.scale(hard ? 0.24 : 0.48, 1);
+  const grad = g.createRadialGradient(0, 0, 0, 0, 0, S / 2);
   if (hard) {
-    grad.addColorStop(0.00, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.45, 'rgba(255,255,255,0.92)');
-    grad.addColorStop(0.75, 'rgba(255,255,255,0.28)');
+    grad.addColorStop(0.00, 'rgba(255,255,255,.94)');
+    grad.addColorStop(0.32, 'rgba(235,244,243,.72)');
+    grad.addColorStop(0.66, 'rgba(215,229,230,.18)');
     grad.addColorStop(1.00, 'rgba(255,255,255,0)');
   } else {
-    grad.addColorStop(0.00, 'rgba(255,255,255,0.85)');
-    grad.addColorStop(0.35, 'rgba(255,255,255,0.42)');
-    grad.addColorStop(0.70, 'rgba(255,255,255,0.11)');
+    grad.addColorStop(0.00, 'rgba(235,243,241,.52)');
+    grad.addColorStop(0.38, 'rgba(224,236,235,.24)');
+    grad.addColorStop(0.74, 'rgba(210,224,225,.055)');
     grad.addColorStop(1.00, 'rgba(255,255,255,0)');
   }
   g.fillStyle = grad;
-  g.fillRect(0, 0, S, S);
+  g.fillRect(-S, -S / 2, S * 2, S);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -50,7 +53,7 @@ varying float vLife;
 varying vec3 vCol;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  gl_PointSize = clamp(aSize * uScale / max(0.35, -mv.z), 1.0, 420.0);
+  gl_PointSize = clamp(aSize * uScale / max(0.35, -mv.z), 0.65, 22.0);
   gl_Position = projectionMatrix * mv;
   vLife = aLife;
   vCol = aColor;
@@ -222,7 +225,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 export class SprayFX {
   constructor(scene) {
     this.mist = new Pool({ max: 5200, gravity: 3.2, drag: 1.35, hard: false,
-                           additive: true, opacity: 0.30, stride: 4, order: 12 });
+                           additive: false, opacity: 0.16, stride: 4, order: 12 });
     this.drops = new Pool({ max: 3600, gravity: 9.81, drag: 0.22, hard: true,
                             additive: false, opacity: 0.95, stride: 3, order: 11 });
     this.foam = new Pool({ max: 2600, gravity: 0, drag: 1.9, hard: false,

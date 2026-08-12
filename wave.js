@@ -70,13 +70,30 @@ export const SET = [
   { name: 'SUNDOWN',     A: 6.50, peelSpeed: 14.4, faceSteep: 0.27 },
 ];
 
-/** Apply a wave from the set. Mutates WAVE in place — every module holds the same
- *  object reference, so this reaches the sim and the renderer at once. */
+/** Apply a wave from the legacy single-break set. See applyWave for the tour. */
 export function setWave(i) {
   const p = SET[Math.max(0, Math.min(SET.length - 1, i))];
   Object.assign(WAVE, BASE, p);
   return p;
 }
+
+/**
+ * Apply an arbitrary set of wave parameters — a break's profile merged with one of
+ * its waves (see breaks.js `waveParams`).
+ *
+ * Mutates WAVE in place, because every module holds the same object reference, so
+ * one assignment reaches the sim, the renderer and the spray at once. It always
+ * restores from BASE first, so a break that sets `rideLength` and a later one that
+ * does not cannot inherit it — that class of bug only shows up several waves into
+ * a session and looks like the wave randomly changed its mind.
+ */
+export function applyWave(params) {
+  Object.assign(WAVE, BASE, params);
+  return params;
+}
+
+/** The untouched defaults, for tests that need to restore them. */
+export function waveDefaults() { return { ...BASE }; }
 
 const EXP = Math.exp;
 

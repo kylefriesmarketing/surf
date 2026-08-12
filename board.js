@@ -36,9 +36,16 @@ export const TUNE = {
   maxSpeed: 25.0,
   pumpImpulse: 7.4,   // m/s of forward speed a perfectly timed pump is worth
   pumpCooldown: 0.30,
-  popImpulse: 4.6,    // extra vertical kick when you pop off the lip
+  popImpulse: 2.8,    // extra vertical kick when you pop off the lip
+  launchEfficiency: 0.70, // fraction of surface-follow speed you carry off the lip
+  launchMax: 8.5,     // hard ceiling on launch speed: ~3.7m of air, ~1.7s hang.
+                      // Must stay below landHard or airs are unlandable by design.
+  launchMin: 3.4,      // below this you never leave the water at all
   launchLambda: 0.9,  // surface support below this and you are off the water
-  landHard: 11.0,     // impact speed above which a landing goes wrong
+  landHard: 15.0,     // impact speed above which a landing goes wrong. Must clear
+                      // launchMax + popImpulse WITH headroom: you land in a trough
+                      // that is itself dropping, so you fall further than you rose
+                      // and impact runs ~1.5x the launch speed on the big waves.
   landAngle: 0.62,    // heading-vs-velocity mismatch that goes wrong on landing
   foamDrag: 3.1,      // how hard the whitewater scrubs you
   foamGrace: 1.05,    // seconds you can survive inside the foam
@@ -223,10 +230,40 @@ export function stepRider(r, t, input, dt) {
   // what drives λ negative — no threshold hack needed. The small positive bias is
   // the one concession to feel, so you do not flutter in and out at the crest.
   if (_a.lam < TUNE.launchLambda && surfaceRate > 0.5) {
-    r.air = true;
-    v.y = Math.max(surfaceRate, 1.5) + (input.pump ? TUNE.popImpulse : 0);
-    r.airTime = 0; r.spin = 0;
-    ev.launched = true;
+    // ⚠️ HOW FAST YOU LEAVE needs damping and a ceiling, and here is why.
+    //
+    // Kinematically `surfaceRate` is right: while you are stuck to the surface your
+    // true velocity is (vx, surfaceRate, vz), so that is what you carry off the lip.
+    // But surfaceRate = ∂h/∂t + v·∇h, and on a near-vertical face this model's
+    // ∂h/∂t is enormous — the whole wave is translating shoreward at the celerity
+    // through a slope approaching 1. Taken raw it launched riders at up to 31 m/s:
+    // 50 m of air, 6 s of hang, landing at an impact of 32 against a threshold of
+    // 11, so EVERY air was a guaranteed wipeout. Reported from play, then measured
+    // across all four breaks before anything was changed.
+    //
+    // A real surfer does not carry all of that: they separate from the face before
+    // it goes vertical, and the water at the lip is moving away from them as they
+    // go. `launchEfficiency` is that loss, and `launchMax` is the ceiling that keeps
+    // the biggest waves landable.
+    //
+    // ⚠️ Do NOT "fix" this by using v·∇h (the ramp you climbed) instead. That was
+    // tried: launch fires at the CREST, where the gradient is zero by definition, so
+    // the climb term vanishes exactly when it is needed and every air collapses to
+    // 0.1 m. Measured, 15 cases, all four breaks.
+    let vy = surfaceRate * TUNE.launchEfficiency;
+    if (input.pump) vy += TUNE.popImpulse;                 // pop off the lip
+
+    // ⚠️ A launch has to CLEAR launchMin or it does not happen at all. Without this
+    // floor the board micro-hops off every ripple — measured at 16–20 launches a
+    // minute on the point and 169 a minute on the outer bank, none of them more
+    // than a few centimetres. That is not an air, it is a rattle, and it buries the
+    // real ones in noise. Below the threshold you simply stay on the water.
+    if (vy >= TUNE.launchMin) {
+      r.air = true;
+      v.y = Math.min(TUNE.launchMax, vy);
+      r.airTime = 0; r.spin = 0;
+      ev.launched = true;
+    }
   }
 
   r.lam = _a.lam;

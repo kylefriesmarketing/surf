@@ -6,6 +6,7 @@ import * as W from './wave.js';
 import { WAVE } from './wave.js';
 import { createRider, stepRider, TUNE, takeoffSpot } from './board.js';
 import { createTrickState, updateTricks, TRICKS } from './tricks.js';
+import * as B from './breaks.js';
 
 let pass = 0, fail = 0;
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
@@ -168,6 +169,28 @@ function surferPolicy(wantLag) {
     const want = wantLag(t);
     const tgtZ = Math.max(-8, Math.min(-0.8, -4 + 0.42 * (lag - want)));
     const tgtH = Math.max(-0.6, Math.min(0.5, 0.14 * (tgtZ - relZ)));
+    return {
+      carve: Math.max(-1, Math.min(1, (tgtH - r.heading) * 3.5)),
+      pump: lag > want - 2 && (t * 120 | 0) % 34 === 0 ? 1 : 0,
+      tuck: 0,
+    };
+  };
+}
+
+
+// Same cascade as surferPolicy, but with its height targets scaled by the wave's
+// own width. The barrel band is defined at u = -0.80 in units of WAVE.W, so a
+// controller that targets a fixed number of METRES sails straight past the tube on
+// a narrow break — THE SHELF barrelled 0.6s with the absolute version and 58s with
+// this one, and it is the designated slab. Test-harness bug, not a wave bug.
+function breakPolicy(wantLag) {
+  return (t, r) => {
+    const k = WAVE.W / 9;
+    const relZ = r.p.z - W.crestZ(r.p.x, r._t);
+    const lag = r.lag ?? 0;
+    const want = wantLag(t);
+    const tgtZ = Math.max(-9 * k, Math.min(-0.8 * k, (-4 + 0.42 * (lag - want)) * k));
+    const tgtH = Math.max(-0.6, Math.min(0.5, 0.14 * (tgtZ - relZ) / k));
     return {
       carve: Math.max(-1, Math.min(1, (tgtH - r.heading) * 3.5)),
       pump: lag > want - 2 && (t * 120 | 0) % 34 === 0 ? 1 : 0,
@@ -477,6 +500,171 @@ group('tricks: every manoeuvre is reachable');
   const smooth = trickRun(4800, surferPolicy(() => -14));
   const total = Object.values(smooth.fired).reduce((a, b) => a + b, 0);
   ok('a smooth trim triggers nothing', total === 0, JSON.stringify(smooth.fired));
+}
+
+
+group('breaks: every wave at every break is rideable');
+{
+  // Four breaks that play differently is only worth having if all of them are
+  // actually surfable. A break whose numbers do not work is a wave you cannot ride
+  // and a heat you cannot pass, and neither announces itself in play.
+  const before = W.waveDefaults();
+  let broken = [];
+  for (const b of B.BREAKS) {
+    for (let i = 0; i < b.waves.length; i++) {
+      W.applyWave(B.waveParams(b.id, i));
+      const label = `${b.name} / ${b.waves[i].name}`;
+      const safe = ride(7200, breakPolicy(() => -14));
+      const greedy = ride(7200, breakPolicy(() => 9));
+      const good = !safe.r.down && safe.log.dist > 200 && greedy.r.down;
+      if (!good) broken.push(`${label}: safe=${safe.log.dist.toFixed(0)}m/${safe.r.downReason || 'alive'} greedy=${greedy.r.downReason || 'ALIVE'}`);
+    }
+  }
+  ok('all 15 waves survive a good line and punish a greedy one', broken.length === 0,
+     broken.join(' | '));
+
+  // Each break has to actually feel different, or they are reskins.
+  const character = {};
+  for (const b of B.BREAKS) {
+    W.applyWave(B.waveParams(b.id, b.waves.length - 1));
+    const r = ride(7200, breakPolicy(() => -14));
+    character[b.id] = { dist: r.log.dist, speed: r.log.maxSpeed };
+  }
+  ok('the outer bank is the fastest wave in the game',
+     character.outer.speed > character.home.speed,
+     `outer=${character.outer.speed.toFixed(1)} home=${character.home.speed.toFixed(1)}`);
+  // Distinguish the breaks by the things they were DESIGNED to differ on, not by
+  // top speed — the cove's last wave peels at 15.4 and the shelf's at 15.2, so
+  // "the slab is faster" was an invented claim that the numbers never made.
+  const len = (id) => B.byId(id).profile.rideLength;
+  ok('the slab is the shortest ride', len('shelf') === Math.min(...B.BREAKS.map((b) => b.profile.rideLength)),
+     `shelf=${len('shelf')} cove=${len('cove')} home=${len('home')}`);
+  ok('the outer bank runs longest', len('outer') === Math.max(...B.BREAKS.map((b) => b.profile.rideLength)),
+     `${len('outer')}`);
+  ok('every break has a distinct profile',
+     new Set(B.BREAKS.map((b) => JSON.stringify(b.profile))).size === B.BREAKS.length);
+
+  // The shelf is the BARREL break — that is its whole identity. If it stops
+  // barrelling it has no reason to exist.
+  W.applyWave(B.waveParams('shelf', 2));
+  const slab = ride(7200, breakPolicy(() => 5.5));
+  ok('the slab barrels', slab.log.barrelTime > 5, `${slab.log.barrelTime.toFixed(1)}s`);
+
+  W.applyWave(before);
+  ok('applyWave leaves no residue', WAVE.A === before.A && WAVE.W === before.W
+     && WAVE.rideLength === before.rideLength);
+}
+
+group('tour: the career holds together');
+{
+  // Every goal has to be reachable, or a heat is unpassable and nobody finds out
+  // until they are stuck on it.
+  let unreachable = [];
+  for (const h of B.TOUR) {
+    const br = B.byId(h.breakId);
+    if (h.waves > br.waves.length) unreachable.push(`${h.id}: wants ${h.waves} waves, ${br.name} has ${br.waves.length}`);
+    for (const [type] of h.goals) {
+      if (!B.OBJECTIVES[type]) unreachable.push(`${h.id}: unknown goal type "${type}"`);
+    }
+    for (const [type, target] of h.goals) {
+      if (type === 'clean' && target > h.waves) unreachable.push(`${h.id}: needs ${target} clean of ${h.waves} waves`);
+    }
+  }
+  ok('every heat is internally consistent', unreachable.length === 0, unreachable.join(' | '));
+
+  // Progression must not deadlock: the stars available before a heat must always
+  // cover what that heat demands.
+  let gated = [];
+  let available = 0;
+  for (let i = 0; i < B.TOUR.length; i++) {
+    if (B.starsToUnlock(i) > available) gated.push(`${B.TOUR[i].id} needs ${B.starsToUnlock(i)}, only ${available} earnable before it`);
+    available += B.TOUR[i].goals.length;
+  }
+  ok('the tour cannot deadlock', gated.length === 0, gated.join(' | '));
+
+  // Judging.
+  const heat = B.TOUR[0];
+  const totals = { total: 5000, dist: 400, barrel: 2, tubes: 1, tricks: 2, airs: 0,
+                   topSpeed: 12, clean: 2, waves: 3, wipeouts: 1 };
+  const res = B.judge(heat, totals);
+  ok('judging returns one result per goal', res.length === heat.goals.length);
+  ok('a met goal reads as met', res.every((r) => typeof r.met === 'boolean'));
+  ok('goals with headroom pass', B.judge(heat, totals).filter((r) => r.met).length >= 2,
+     JSON.stringify(B.judge(heat, totals).map((r) => `${r.type}:${r.got}/${r.target}`)));
+  const weak = B.judge(heat, { total: 0, dist: 0, barrel: 0, tubes: 0, tricks: 0, airs: 0, topSpeed: 0, clean: 0 });
+  ok('an empty session clears nothing', weak.every((r) => !r.met));
+
+  // Career state.
+  const c = B.newCareer();
+  B.recordHeat(c, heat, res, totals);
+  const firstStars = c.stars;
+  ok('finishing a heat earns stars', firstStars > 0, `${firstStars}`);
+  ok('lifetime stats accumulate', c.lifetime.waves === 3 && c.lifetime.tubes === 1);
+
+  // Replaying a heat BADLY must never cost you progress.
+  B.recordHeat(c, heat, weak, { total: 10, dist: 1, barrel: 0, tubes: 0, tricks: 0,
+                                airs: 0, topSpeed: 1, clean: 0, waves: 3, wipeouts: 3 });
+  ok('a bad replay cannot take stars away', c.stars === firstStars, `${c.stars} vs ${firstStars}`);
+  ok('but lifetime stats still count it', c.lifetime.waves === 6);
+  ok('best set score is kept', c.bestSet === 5000, `${c.bestSet}`);
+
+  ok('the first heat is open from the start', B.heatUnlocked(B.newCareer(), 0));
+  ok('later heats are not', !B.heatUnlocked(B.newCareer(), B.TOUR.length - 1));
+  ok('the home break is open from the start', B.breakUnlocked(B.newCareer(), B.BREAKS[0]));
+}
+
+
+group('rider: airs are landable');
+{
+  // ⚠️ REGRESSION GUARD. This shipped broken and was caught in play: coming off the
+  // top launched you at up to 31 m/s for FIFTY METRES of air and a 6 s hang, landing
+  // at an impact of 32 against a wipeout threshold of 11 — so every single air was a
+  // guaranteed wipeout. The cause was using the raw surface-follow rate as launch
+  // velocity; that number is ∂h/∂t + v·∇h, and on a near-vertical face the first
+  // term is the whole wave translating shoreward through a slope approaching 1.
+  const before = W.waveDefaults();
+  const flights = [];
+  for (const [bid, wi] of [['home', 1], ['home', 4], ['cove', 2], ['shelf', 2], ['outer', 2]]) {
+    W.applyWave(B.waveParams(bid, wi));
+    for (const vz of [12, 18, 24]) {
+      const t0 = 4, x = W.breakX(t0) - 2;
+      const r = createRider(t0);
+      r.p.x = x; r.p.z = W.crestZ(x, t0) - 7; r.p.y = W.height(r.p.x, r.p.z, t0);
+      r.v.x = 6; r.v.z = vz; r.heading = Math.PI / 2 - 0.25;
+      let t = t0, cur = null;
+      for (let i = 0; i < 1400; i++) {
+        const ev = stepRider(r, t, HOLD(), DT);
+        if (ev.launched) cur = { vy: r.v.y, base: r.p.y, peak: r.p.y };
+        if (r.air && cur) cur.peak = Math.max(cur.peak, r.p.y);
+        if (ev.landed && cur) { cur.impact = ev.landed; flights.push(cur); cur = null; }
+        t += DT;
+        if (r.down) { flights.push({ ...(cur || {}), wiped: r.downReason }); break; }
+      }
+    }
+  }
+
+  const airs = flights.filter((f) => f.base !== undefined);
+  const heights = airs.map((f) => f.peak - f.base);
+  const impacts = airs.map((f) => f.impact).filter((v) => v !== undefined);
+  const launches = airs.map((f) => f.vy);
+
+  ok('airs actually happen', airs.length > 4, `${airs.length} flights`);
+  ok('no air exceeds the launch ceiling', Math.max(...launches) <= TUNE.launchMax + 1e-6,
+     `max launch ${Math.max(...launches).toFixed(1)} vs cap ${TUNE.launchMax}`);
+  ok('no air goes higher than a surfer could', Math.max(...heights) < 6,
+     `biggest ${Math.max(...heights).toFixed(1)}m`);
+  ok('landing impact stays under the wipeout threshold',
+     impacts.length === 0 || Math.max(...impacts) <= TUNE.landHard,
+     `worst impact ${Math.max(...impacts).toFixed(1)} vs landHard ${TUNE.landHard}`);
+  ok('the launch ceiling is below the landing threshold — airs must be landable',
+     TUNE.launchMax + TUNE.popImpulse <= TUNE.landHard,
+     `${TUNE.launchMax} + ${TUNE.popImpulse} vs ${TUNE.landHard}`);
+
+  const wipes = flights.filter((f) => f.wiped === 'landing').length;
+  ok('straight airs off the lip are mostly survivable', wipes <= 2,
+     `${wipes} landing wipeouts across ${flights.length} flights`);
+
+  W.applyWave(before);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

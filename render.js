@@ -27,14 +27,14 @@ import { WAVE } from './wave.js';
 export const SUN = new THREE.Vector3(-0.30, 0.34, 0.89).normalize();
 
 const PAL = {
-  deep:    new THREE.Color(0x0b3d55),
-  shallow: new THREE.Color(0x35b4c0),
-  glow:    new THREE.Color(0x62f0cc),   // the backlit face
-  sky:     new THREE.Color(0x8fbede),
-  horizon: new THREE.Color(0xe8b48a),
-  sunCol:  new THREE.Color(0xfff2d0),
-  zenith:  new THREE.Color(0x1b3a63),
-  low:     new THREE.Color(0xeab68c),
+  deep:    new THREE.Color(0x062b3b),
+  shallow: new THREE.Color(0x287f84),
+  glow:    new THREE.Color(0x4fb99e),   // restrained spectral backscatter
+  sky:     new THREE.Color(0x81969e),
+  horizon: new THREE.Color(0x69787b),
+  sunCol:  new THREE.Color(0xffedca),
+  zenith:  new THREE.Color(0x172630),
+  low:     new THREE.Color(0x69787b),
 };
 
 // ---------------------------------------------------------------- ocean
@@ -91,23 +91,23 @@ void main() {
   float thin = smoothstep(-0.8, 2.8, vH);
   float back = pow(max(0.0, dot(-V, L)), 2.2);
   float steep = smoothstep(0.03, 0.34, 1.0 - N.y);
-  vec3 glow = uGlow * back * thin * steep * 2.05;
+  vec3 glow = uGlow * back * thin * steep * 1.25;
 
   float fres = pow(1.0 - max(0.0, dot(N, V)), 4.0);
-  vec3 col = mix(base, uSky, fres * 0.40);
+  vec3 col = mix(base, uSky, fres * 0.52);
 
   // Sun + a sky-bounce ambient floor. Without the ambient term the shadowed side
   // of every swell goes to near black, because water this saturated has almost no
   // colour left to lose once diffuse falls off.
   float dif = max(0.0, dot(N, L));
-  col = col * (0.66 + 0.52 * dif) + uSky * 0.11;
+  col = col * (0.54 + 0.48 * dif) + uSky * 0.08;
   col += glow;
 
   vec3 H = normalize(L + V);
-  col += uSunCol * pow(max(0.0, dot(N, H)), 200.0) * 2.1;
+  col += uSunCol * pow(max(0.0, dot(N, H)), 260.0) * 1.35;
   // Fine glitter, so the flat water is not a dead plastic sheet.
   float gl = fbm(vW.xz * 1.7 + uTime * 0.35);
-  col += uSunCol * pow(max(0.0, dot(N, H)), 40.0) * gl * 0.28;
+  col += uSunCol * pow(max(0.0, dot(N, H)), 54.0) * gl * 0.18;
 
   float churn = fbm(vW.xz * 1.15 - uTime * vec2(0.9, 0.35));
   float fm = clamp(vFoam * 1.3 - 0.10, 0.0, 1.0);
@@ -261,7 +261,7 @@ export class Ocean {
  * score will be in different places.
  */
 export class Curl {
-  constructor(scene, stations = 74, segs = 13) {
+  constructor(scene, stations = 96, segs = 25) {
     this.S = stations; this.G = segs;
     const n = stations * segs;
     this.pos = new Float32Array(n * 3);
@@ -316,8 +316,8 @@ export class Curl {
       // the tube you can score are the same tube.
       const th = Math.exp(-(((lag - 5) / 8.5) ** 2)) > 0.05
         ? Math.exp(-(((lag - 5) / 8.5) ** 2)) : 0;
-      const R = 2.15 * th + 0.12;
-      const arc = 2.75 * th;
+      const R = 1.55 * th + 0.10;
+      const arc = 2.30 * th;
       for (let j = 0; j < G; j++) {
         const s = j / (G - 1);
         const a = s * arc;
@@ -325,7 +325,7 @@ export class Curl {
         pos[p] = x + Math.sin(s * 9 + t * 3 + i) * 0.10 * th;
         pos[p + 1] = lipY - R * (1 - Math.cos(a)) - s * 0.10;
         pos[p + 2] = cz - R * Math.sin(a);
-        aF[i * G + j] = Math.min(1, 0.04 + s * 1.10);
+        aF[i * G + j] = Math.min(1, Math.pow(s, 8.0) * 0.62 + th * 0.012);
       }
     }
     this.rebuildNormals();
@@ -359,7 +359,7 @@ export class Curl {
 
 // ---------------------------------------------------------------- sky
 export function createSky(scene) {
-  const geo = new THREE.SphereGeometry(2600, 32, 20);
+  const geo = new THREE.SphereGeometry(2600, 48, 28);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
     uniforms: {
@@ -372,15 +372,37 @@ export function createSky(scene) {
     fragmentShader: `
       uniform vec3 uZen, uLow, uHor, uSun, uSunCol;
       varying vec3 vD;
+      float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7))) * 43758.5453); }
+      float noise(vec2 p){
+        vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+      }
+      float fbm(vec2 p){
+        float n=0.0; n+=noise(p)*.52; p=p*2.03+17.2; n+=noise(p)*.27;
+        p=p*2.11-9.4; n+=noise(p)*.14; p=p*2.07+4.8; n+=noise(p)*.07; return n;
+      }
       void main(){
-        float h = clamp(vD.y * 1.4 + 0.06, -1.0, 1.0);
-        vec3 col = mix(uHor, uZen, smoothstep(0.0, 0.62, h));
-        col = mix(uLow, col, smoothstep(-0.14, 0.20, h));
-        float s = max(0.0, dot(normalize(vD), normalize(uSun)));
-        col += uSunCol * pow(s, 1400.0) * 2.0;                // the disc
-        col += uSunCol * pow(s, 22.0) * 0.14;                 // the haze around it
-        col += uSunCol * pow(s, 180.0) * 0.34;
-        gl_FragColor = vec4(col, 1.0);
+        vec3 D=normalize(vD);
+        float h=clamp(D.y, -0.2, 1.0);
+        vec3 col=mix(uHor,uZen,smoothstep(0.02,0.68,h));
+        col=mix(uLow,col,smoothstep(-0.08,0.26,h));
+        float az=atan(D.z,D.x);
+        vec2 cp=vec2(az*1.45,D.y*5.2);
+        float broad=fbm(cp*0.72+vec2(1.4,-.6));
+        float detail=fbm(cp*2.05+vec2(-3.2,4.1));
+        float cloud=smoothstep(.50,.78,broad*.72+detail*.28);
+        cloud*=smoothstep(-.03,.16,h)*(1.0-smoothstep(.72,.98,h));
+        vec3 cloudDark=vec3(.19,.235,.25), cloudLight=vec3(.54,.57,.56);
+        float silver=pow(max(0.0,dot(D,normalize(uSun))),9.0);
+        col=mix(col,mix(cloudDark,cloudLight,.25+silver*.75),cloud*.78);
+        float haze=exp(-max(0.0,h)*12.0);
+        col=mix(col,uHor,haze*.26);
+        float s=max(0.0,dot(D,normalize(uSun)));
+        col+=uSunCol*pow(s,2200.0)*1.35;
+        col+=uSunCol*pow(s,85.0)*.18;
+        col+=uSunCol*pow(s,9.0)*.035;
+        float grain=(hash(gl_FragCoord.xy)-.5)/255.0;
+        gl_FragColor=vec4(col+grain,1.0);
       }`,
   });
   const sky = new THREE.Mesh(geo, mat);
@@ -429,75 +451,68 @@ function boardGeometry() {
   return g;
 }
 
-const box = (w, h, d, col, x, y, z, rx = 0, rz = 0) => {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color: col, roughness: 0.72, metalness: 0.02 }));
-  m.position.set(x, y, z); m.rotation.x = rx; m.rotation.z = rz;
-  m.castShadow = true;
-  return m;
+const material = (color, roughness = 0.62, metalness = 0.0) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness });
+
+const capsule = (radius, length, mat, x, y, z, rz = 0, rx = 0) => {
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 8, 12), mat);
+  mesh.position.set(x, y, z); mesh.rotation.z = rz; mesh.rotation.x = rx;
+  mesh.castShadow = true; return mesh;
 };
 
-/**
- * Board + rider. The rider is a jointed stack of boxes rather than a model: at the
- * distance the chase camera sits, silhouette and lean read, detail does not.
- */
+/** Procedural articulated surfer: smooth anatomical volumes, full wetsuit, hands and feet. */
 export function createRig(scene) {
   const root = new THREE.Group();
+  const boardMat = new THREE.MeshPhysicalMaterial({
+    color: 0xe4e6e3, roughness: 0.18, metalness: 0.0, clearcoat: 0.85, clearcoatRoughness: 0.16,
+  });
+  const board = new THREE.Mesh(boardGeometry(), boardMat);
+  board.castShadow = true; board.receiveShadow = true; root.add(board);
 
-  const board = new THREE.Mesh(boardGeometry(), new THREE.MeshStandardMaterial({
-    color: 0xf2f6f8, roughness: 0.24, metalness: 0.04,
-  }));
-  board.castShadow = true;
-  root.add(board);
+  const stringer = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.009, 2.07), material(0x746e64, .38));
+  stringer.position.y = 0.057; root.add(stringer);
+  const traction = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.016, 0.43), material(0x202528, .82));
+  traction.position.set(0, .061, -.76); root.add(traction);
 
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.012, 2.05),
-    new THREE.MeshStandardMaterial({ color: 0xe8563f, roughness: 0.4 }));
-  stripe.position.y = 0.052;
-  root.add(stripe);
-
-  for (const dz of [-0.86, -0.98]) {
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.17, 4),
-      new THREE.MeshStandardMaterial({ color: 0x2b3a44, roughness: 0.5 }));
-    fin.position.set(dz === -0.86 ? 0.10 : -0.10, -0.10, -0.9);
-    fin.rotation.x = Math.PI;
-    root.add(fin);
+  for (const x of [-.11, .11]) {
+    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 12), material(0x1c272b, .38));
+    fin.position.set(x, -0.10, -0.88); fin.rotation.x = Math.PI; root.add(fin);
   }
 
-  // The rider, hips-up, so `body` can be leaned and crouched as one unit.
-  const body = new THREE.Group();
-  body.position.y = 0.06;
-  const SUIT = 0x14202b, SKIN = 0xd9a882, ACC = 0x2fa8c9;
+  const body = new THREE.Group(); body.position.y = 0.06;
+  const suit = material(0x0b1114, .48), suitPanel = material(0x202c30, .42);
+  const skin = material(0x9d6f58, .76), hair = material(0x161310, .9);
 
-  body.add(box(0.30, 0.40, 0.19, SUIT, 0, 0.60, 0.02));           // torso
-  body.add(box(0.26, 0.10, 0.20, ACC, 0, 0.42, 0.02));            // waistband
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 12, 10),
-    new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.8 }));
-  head.position.set(0, 0.90, 0.05);
-  body.add(head);
+  const torso = capsule(.155, .27, suit, 0, .64, .01, 0, -.05); body.add(torso);
+  const chest = capsule(.128, .11, suitPanel, 0, .68, .09, 0, Math.PI / 2); chest.scale.set(1.05,.7,.62); body.add(chest);
+  const neck = capsule(.052, .055, skin, 0, .86, .02); body.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.105, 18, 14), skin);
+  head.scale.set(.86, 1.08, .92); head.position.set(0,.98,.035); head.castShadow=true; body.add(head);
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(.106, 18, 10, 0, Math.PI * 2, 0, Math.PI * .47), hair);
+  hairCap.scale.copy(head.scale); hairCap.position.set(0,.996,.028); hairCap.castShadow=true; body.add(hairCap);
 
-  const armL = box(0.085, 0.34, 0.085, SKIN, -0.24, 0.63, 0.10, 0, 0.55);
-  const armR = box(0.085, 0.34, 0.085, SKIN, 0.24, 0.66, -0.06, 0, -0.75);
-  body.add(armL, armR);
+  const armL = capsule(.045, .30, suit, -.235, .67, .08, .72, -.12);
+  const armR = capsule(.045, .31, suit, .245, .69, -.04, -.86, .10);
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(.052,12,9), skin); handL.position.set(-.39,.52,.10);
+  const handR = new THREE.Mesh(new THREE.SphereGeometry(.052,12,9), skin); handR.position.set(.40,.49,-.03);
+  body.add(armL,armR,handL,handR);
 
-  const legF = box(0.115, 0.38, 0.115, SUIT, -0.02, 0.22, 0.30, 0.42);
-  const legB = box(0.115, 0.38, 0.115, SUIT, 0.02, 0.22, -0.26, -0.30);
-  body.add(legF, legB);
+  const legF = capsule(.065, .34, suit, -.02, .29, .31, 0, .48);
+  const legB = capsule(.065, .34, suit, .02, .28, -.28, 0, -.40);
+  const footF = capsule(.047, .13, suit, -.02, .10, .55, 0, Math.PI / 2);
+  const footB = capsule(.047, .13, suit, .02, .10, -.51, 0, Math.PI / 2);
+  body.add(legF,legB,footF,footB);
 
-  root.add(body);
-  scene.add(root);
-
+  root.add(body); scene.add(root);
   return {
     root, body, board,
-    /** heading/lean/crouch drive the pose; the board itself follows the water. */
     pose(heading, lean, crouch, pitch, roll) {
-      root.rotation.set(0, 0, 0);
-      root.rotation.y = -heading + Math.PI / 2;   // board's +z runs down its length
-      root.rotateX(pitch);
-      root.rotateZ(roll - lean * 0.34);
-      body.rotation.z = -lean * 0.52;
-      body.rotation.x = 0.10 + crouch * 0.34;
-      body.scale.y = 1 - crouch * 0.26;
-      body.position.y = 0.06 - crouch * 0.06;
+      root.rotation.set(0,0,0); root.rotation.y = -heading + Math.PI / 2;
+      root.rotateX(pitch); root.rotateZ(roll - lean * .30);
+      body.rotation.z = -lean * .46; body.rotation.x = .08 + crouch * .30;
+      body.scale.y = 1 - crouch * .20; body.position.y = .06 - crouch * .055;
+      armL.rotation.z = .72 + lean * .18; armR.rotation.z = -.86 + lean * .18;
+      legF.rotation.x = .48 + crouch * .26; legB.rotation.x = -.40 - crouch * .18;
     },
   };
 }
@@ -505,6 +520,12 @@ export function createRig(scene) {
 export function createLights(scene) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 2.5);
   sun.position.copy(SUN).multiplyScalar(120);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 260;
+  sun.shadow.camera.left = -32; sun.shadow.camera.right = 32;
+  sun.shadow.camera.top = 32; sun.shadow.camera.bottom = -32;
+  sun.shadow.bias = -0.0004;
   scene.add(sun);
   scene.add(new THREE.HemisphereLight(0xbfe0ff, 0x123040, 1.15));
   const rim = new THREE.DirectionalLight(0x9fd4ff, 0.55);

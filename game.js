@@ -5,9 +5,13 @@ import * as W from './wave.js';
 import { WAVE } from './wave.js';
 import { createRider, stepRider, takeoffSpot, TUNE } from './board.js';
 import { createTrickState, updateTricks } from './tricks.js';
+import * as B from './breaks.js';
+import * as AI from './ai.js';
+import * as U from './ui.js';
 import { SprayFX } from './particles.js';
-import { Ocean, Curl, createSky, createLights, SUN } from './render.js';
+import { Ocean, Curl, createSky, createLights, createRig, SUN } from './render.js';
 import * as SFX from './sfx.js';
+import { World } from './world.js';
 
 const SUB = 1 / 120;          // the sim always steps at a fixed 120 Hz
 const MAX_FRAME = 0.1;
@@ -20,14 +24,16 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.28;
+renderer.toneMappingExposure = 1.08;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 // Matched to the ocean shader's own distance fade (85→205 to PAL.horizon); the
 // grid and the far plane have to reach the same colour at the same range or the
 // boundary between them reads as a line drawn across the sea.
-scene.fog = new THREE.Fog(0xe8b48a, 85, 205);
+scene.fog = new THREE.Fog(0x69787b, 105, 310);
 const camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, 0.1, 5000);
 
 createSky(scene);
@@ -35,9 +41,9 @@ createLights(scene);
 const ocean = new Ocean(scene);
 const curl = new Curl(scene);
 const fx = new SprayFX(scene);
+const world = new World(scene);
 
-let rig = null;
-import('./render.js').then((m) => { rig = m.createRig(scene); });
+const rig = createRig(scene);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -52,6 +58,7 @@ addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (DOWN[k]) e.preventDefault();
   if (k === 'r') restart();
+  if (k === 'escape' && started && !ui.isOpen()) { el('over').classList.remove('show'); screens.home(); }
   if (k === 'm') { muted = !muted; SFX.setMuted(muted); el('mute').textContent = muted ? '🔇' : '🔊'; }
   keys.add(k);
   begin();
@@ -80,6 +87,7 @@ function begin() {
   started = true;
   SFX.init(); SFX.resume();
   el('intro').classList.add('gone');
+  screens.home();
 }
 canvas.addEventListener('pointerdown', begin);
 
@@ -96,11 +104,28 @@ function input() {
 
 // ---------------------------------------------------------------- run state
 let t, rider, run, trickState;
-// A session is a SET of five waves. `run` is one wave; `session` carries the total.
-let session = { wave: 0, total: 0, log: [], best: loadBest(), done: false };
+
+// Three ways to play, all built on the same session machinery:
+//   tour     — a heat from the career, judged against objectives
+//   free     — any unlocked break, all its waves, pure score attack
+//   contest  — two waves each against a rival, only the two best count
+// `run` is one wave; `session` is the whole outing.
+let mode = 'free';
+let heat = null, rival = null, breakId = 'home';
+let session = newSession();
+const career = loadCareer();
+const ui = new U.UI();
+
+function newSession() {
+  return { wave: 0, total: 0, log: [], best: loadBest(), done: false,
+           dist: 0, barrel: 0, tubes: 0, tricks: 0, airs: 0, topSpeed: 0,
+           clean: 0, wipeouts: 0, waves: 0, waveScores: [] };
+}
 
 function startWave(i) {
-  const preset = W.setWave(i);
+  const bk = B.byId(breakId);
+  const preset = bk.waves[Math.max(0, Math.min(bk.waves.length - 1, i))];
+  W.applyWave(B.waveParams(breakId, i));
   session.wave = i;
   session.done = false;
   t = 4.0;
@@ -115,23 +140,76 @@ function startWave(i) {
     combo: 1, comboT: 0, topSpeed: 0, over: false, msg: '', msgT: 0,
     wasBarrel: false, wasAir: false, barrelSeg: 0,
   };
+  world.setBreak(breakId);
   el('over').classList.remove('show');
-  el('wave-name').textContent = `WAVE ${i + 1}/${W.SET.length} · ${preset.name}`;
+  ui.hide();
+  el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`;
   flash(preset.name);
 }
 
-/** R: next wave if one is waiting, otherwise start the set over. */
+/** How many waves this outing runs for — a heat says so, otherwise the whole break. */
+function waveCount() {
+  if (mode === 'tour' && heat) return heat.waves;
+  if (mode === 'contest') return AI.COUNTING_WAVES;
+  return B.byId(breakId).waves.length;
+}
+
+function beginSession(m, opts) {
+  mode = m;
+  heat = opts.heat || null;
+  rival = opts.rival || null;
+  breakId = opts.breakId;
+  session = newSession();
+  started = true;
+  el('intro').classList.add('gone');
+  SFX.init(); SFX.resume();
+  startWave(0);
+}
+
+/** R: next wave if one is waiting, otherwise restart the outing. */
 function restart() {
+  if (ui.isOpen()) return;
   if (run && run.over && !session.done) startWave(session.wave + 1);
-  else { session = { wave: 0, total: 0, log: [], best: session.best, done: false }; startWave(0); }
+  else { const o = { heat, rival, breakId }; beginSession(mode, o); }
 }
 function loadBest() {
   const v = parseFloat(localStorage.getItem('surf-best') || '0');
   return Number.isFinite(v) ? v : 0;
 }
+function loadCareer() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('surf-career') || 'null');
+    if (raw && raw.lifetime && raw.heats) return { ...B.newCareer(), ...raw,
+      lifetime: { ...B.newCareer().lifetime, ...raw.lifetime } };
+  } catch { /* a corrupt save must not brick the game */ }
+  return B.newCareer();
+}
+function saveCareer() {
+  try { localStorage.setItem('surf-career', JSON.stringify(career)); } catch {}
+}
 startWave(0);
 
 function flash(text) { run.msg = text; run.msgT = 1.6; }
+
+// ---------------------------------------------------------------- front end
+const screens = {
+  home: () => U.homeScreen(ui, career, {
+    tour: screens.tour, free: screens.free, contest: screens.contest, stats: screens.stats,
+  }),
+  tour: () => U.tourScreen(ui, B.TOUR, career, B, {
+    play: (h) => beginSession('tour', { heat: h, breakId: h.breakId }),
+    back: screens.home,
+  }),
+  free: () => U.breakScreen(ui, B.BREAKS, career, B, {
+    play: (b) => beginSession('free', { breakId: b.id }),
+    back: screens.home,
+  }),
+  contest: () => U.contestScreen(ui, AI.RIVALS, B.BREAKS, career, B, {
+    play: (r, b) => beginSession('contest', { rival: r, breakId: b.id }),
+    back: screens.home,
+  }),
+  stats: () => U.statsScreen(ui, career, B.TOUR, { back: screens.home }),
+};
 
 // ---------------------------------------------------------------- scoring
 function score(dt, ev) {
@@ -193,11 +271,26 @@ function finish(reason) {
   session.total += run.score;
   session.log.push({ name: run.waveName, score: Math.round(run.score), reason,
                      dist: run.dist, barrel: run.barrelTime });
+  session.waveScores.push(run.score);
 
-  const last = session.wave >= W.SET.length - 1;
+  // Roll this wave into the session totals the objectives are judged against.
+  const wiped = reason !== 'THE WAVE RUNS OUT';
+  session.waves++;
+  session.dist += run.dist;
+  session.barrel += run.barrelTime;
+  session.tubes += run.tubes;
+  session.tricks += run.tricks;
+  session.airs += run.airs;
+  session.wipeouts += wiped ? 1 : 0;
+  session.clean += wiped ? 0 : 1;
+  session.topSpeed = Math.max(session.topSpeed, run.topSpeed);
+
+  const last = session.wave >= waveCount() - 1;
   session.done = last;
 
-  if (!last) {
+  if (last) { endSession(); return; }
+
+  {
     // Between waves: this wave's card, then paddle back out for the next one.
     el('ov-title').textContent = reason;
     el('ov-score').textContent = Math.round(run.score).toLocaleString();
@@ -206,24 +299,108 @@ function finish(reason) {
       `<div><b>${run.barrelTime.toFixed(1)}</b> s barrelled · ${run.tubes} tube${run.tubes === 1 ? '' : 's'}</div>` +
       `<div><b>${(run.topSpeed * 3.6).toFixed(0)}</b> km/h top speed</div>` +
       `<div class="best">SET TOTAL ${Math.round(session.total).toLocaleString()}</div>`;
-    el('ov-again').textContent = `PRESS R FOR WAVE ${session.wave + 2} — ${W.SET[session.wave + 1].name}`;
-  } else {
-    // End of the set: the score that actually counts.
-    if (session.total > session.best) {
-      session.best = session.total;
-      localStorage.setItem('surf-best', String(Math.round(session.total)));
-      session.newBest = true;
-    }
-    el('ov-title').textContent = 'THE SET IS OVER';
-    el('ov-score').textContent = Math.round(session.total).toLocaleString();
-    el('ov-lines').innerHTML =
-      session.log.map((w, i) =>
-        `<div><span class="wv">${i + 1}. ${w.name}</span> <b>${w.score.toLocaleString()}</b>` +
-        `<span class="wr">${w.reason.toLowerCase()}</span></div>`).join('') +
-      `<div class="best">${session.newBest ? '★ NEW BEST SET' : 'best set ' + Math.round(session.best).toLocaleString()}</div>`;
-    el('ov-again').textContent = 'PRESS R TO PADDLE BACK OUT';
+    const nextName = B.byId(breakId).waves[session.wave + 1].name;
+    el('ov-again').textContent = `PRESS R FOR WAVE ${session.wave + 2} — ${nextName}`;
   }
   el('over').classList.add('show');
+}
+
+/**
+ * The outing is over. Where it goes next depends on how you were playing:
+ * a heat gets judged against its objectives, a contest gets scored against the
+ * rival's two best waves, and free surf just posts a set total.
+ */
+function endSession() {
+  if (session.total > session.best) {
+    session.best = session.total;
+    localStorage.setItem('surf-best', String(Math.round(session.total)));
+    session.newBest = true;
+  }
+
+  if (mode === 'tour' && heat) {
+    const results = B.judge(heat, session);
+    B.recordHeat(career, heat, results, session);
+    saveCareer();
+    U.resultsScreen(ui, heat, results, session, null, {
+      retry: () => beginSession('tour', { heat, breakId: heat.breakId }),
+      tour: () => screens.tour(),
+    });
+    return;
+  }
+
+  if (mode === 'contest' && rival) {
+    // The rival surfs the SAME waves, headlessly and deterministically, so the heat
+    // is a like-for-like comparison rather than a number pulled out of the air.
+    const theirRaw = simulateRival(rival, breakId, AI.COUNTING_WAVES);
+    const you = { waves: session.waveScores.map(AI.judgeWave),
+                  total: 0 };
+    const them = { waves: theirRaw.map(AI.judgeWave), total: 0 };
+    you.total = AI.heatScore(you.waves);
+    them.total = AI.heatScore(them.waves);
+    career.lifetime.waves += 0;
+    saveCareer();
+    U.contestResults(ui, rival, you, them, {
+      retry: () => beginSession('contest', { rival, breakId }),
+      back: () => screens.home(),
+    });
+    return;
+  }
+
+  // Free surf.
+  el('ov-title').textContent = 'THE SET IS OVER';
+  el('ov-score').textContent = Math.round(session.total).toLocaleString();
+  el('ov-lines').innerHTML =
+    session.log.map((w, i) =>
+      `<div><span class="wv">${i + 1}. ${w.name}</span> <b>${w.score.toLocaleString()}</b>` +
+      `<span class="wr">${w.reason.toLowerCase()}</span></div>`).join('') +
+    `<div class="best">${session.newBest ? '★ NEW BEST SET' : 'best set ' + Math.round(session.best).toLocaleString()}</div>`;
+  el('ov-again').textContent = 'PRESS R TO PADDLE BACK OUT · ESC FOR THE MENU';
+  B.recordHeat(career, { id: `free-${breakId}`, goals: [] }, [], session);
+  saveCareer();
+  el('over').classList.add('show');
+}
+
+/**
+ * Run the rival's waves at full sim rate with no rendering. It is the same
+ * board.js, the same wave, and the same trick detector the player uses — the only
+ * difference is who is holding the controls.
+ */
+function simulateRival(r, bid, count) {
+  const scores = [];
+  const bk = B.byId(bid);
+  for (let i = 0; i < count; i++) {
+    W.applyWave(B.waveParams(bid, Math.min(i, bk.waves.length - 1)));
+    let ts = 4.0;
+    const rr = createRider(ts);
+    const sp = takeoffSpot(ts);
+    rr.p.x = sp.x; rr.p.z = sp.z; rr.p.y = W.height(sp.x, sp.z, ts);
+    rr.v.x = 5; rr.v.z = -1;
+    const brain = AI.createAI(r, 1000 + i * 97);
+    const tk = createTrickState();
+    let sc = 0, combo = 1, comboT = 0, seg = 0, wasB = false;
+    const x0 = rr.p.x;
+    for (let k = 0; k < 9000; k++) {
+      const ev = stepRider(rr, ts, AI.aiInput(brain, rr, W, ts, SUB), SUB);
+      sc += SUB * rr.speed * (0.55 + rr.pocket * 1.9) * combo;
+      if (rr.barrel > 0.5) { sc += SUB * 130 * combo; comboT = 2.2; seg += SUB;
+        if (!wasB) combo = Math.min(8, combo + 1); wasB = true; }
+      else { if (wasB) sc += seg * 260; seg = 0; wasB = false; }
+      for (const m of updateTricks(tk, rr, ev, ts, SUB)) {
+        sc += m.points * combo;
+        combo = Math.min(8, combo + (m.points >= 250 ? 0.7 : 0.4));
+        comboT = m.hold;
+      }
+      comboT -= SUB;
+      if (comboT <= 0) combo = Math.max(1, combo - SUB * 1.1);
+      ts += SUB;
+      if (rr.down) break;
+      if (rr.p.x - x0 > WAVE.rideLength) break;
+    }
+    // Skill scales the result a little, so the ladder actually ramps.
+    scores.push(sc * (0.72 + 0.42 * r.skill));
+  }
+  W.applyWave(B.waveParams(bid, session.wave));   // restore the player's wave
+  return scores;
 }
 
 // ---------------------------------------------------------------- camera
@@ -235,7 +412,7 @@ function updateCamera(dt) {
   const p = rider.p;
   // Sit behind and outside the rider, looking down the line toward the section
   // that has not broken yet — which is where the wave, and the decision, is.
-  const back = 8.6 + rider.speed * 0.30;
+  const back = 4.5 + rider.speed * 0.10;
   const fh = Math.cos(rider.heading), fz = Math.sin(rider.heading);
   const inTube = rider.barrel > 0.5;
 
@@ -248,15 +425,15 @@ function updateCamera(dt) {
   // In the tube the camera tucks in tight and drops almost to the water, deep under
   // the lip, so the curl wraps overhead and the exit is a bright hole down the line.
   // That framing only exists for a second or two a run, which is the point of it.
-  const tubeBack = 4.6;
+  const tubeBack = 5.4;
   const want = inTube
     ? new THREE.Vector3(
         p.x - fh * tubeBack + rider.lean * 0.5,
-        p.y + 1.15,
-        p.z - fz * tubeBack + 0.9)
+        p.y + 1.45,
+        p.z - fz * tubeBack - 4.3)
     : new THREE.Vector3(
         p.x - fh * back + rider.lean * 1.4,
-        p.y + 2.4 + rider.speed * 0.055,
+        p.y + 1.55 + rider.speed * 0.032,
         p.z - fz * back - 4.2);
 
   // Never let the camera end up under the water; nothing reads worse.
@@ -272,8 +449,8 @@ function updateCamera(dt) {
   const lookAhead = 6 + rider.speed * 0.55;
   camLook.lerp(inTube
     // Down the throat of the tube, not up at the ceiling.
-    ? new THREE.Vector3(p.x + fh * 16, p.y + 1.9, p.z + fz * 8 + 1.5)
-    : new THREE.Vector3(p.x + fh * lookAhead, p.y + 3.4, p.z + fz * lookAhead * 0.5 + 4.5),
+    ? new THREE.Vector3(p.x + fh * 13, p.y + 0.75, p.z + fz * 7 + 3.0)
+    : new THREE.Vector3(p.x + fh * lookAhead, p.y + 0.8, p.z + fz * lookAhead * 0.5 + 4.0),
     Math.min(1, dt * (inTube ? 7 : 5)));
 
   camera.position.copy(camPos);
@@ -281,7 +458,7 @@ function updateCamera(dt) {
   camRoll += (-rider.lean * 0.13 - camRoll) * Math.min(1, dt * 4);
   camera.rotateZ(camRoll);
 
-  const wantFov = 64 + Math.min(20, rider.speed * 0.85) + (inTube ? 6 : 0);
+  const wantFov = 49 + Math.min(10, rider.speed * 0.38) + (inTube ? 4 : 0);
   camFov += (wantFov - camFov) * Math.min(1, dt * 3);
   camera.fov = camFov;
   camera.updateProjectionMatrix();
@@ -368,6 +545,7 @@ function frame(dt, override) {
   fx.update(dt, heightAt, -1.5, 0.6);
 
   // --- view
+  world.update(dt, p.x, W.crestZ(p.x, t));
   ocean.update(t, p.x, camera);
   curl.update(t, p.x, camera);
   updateCamera(dt);
@@ -407,7 +585,8 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 // ---------------------------------------------------------------- debug handles
-window.__surf = () => ({ t, rider, run, session, trickState, fx, ocean, curl,
+window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat, rival,
+                         breakId, screens, ui, world, fx, ocean, curl,
                          renderer, scene, camera, THREE });
 window.__surfRestart = restart;
 
