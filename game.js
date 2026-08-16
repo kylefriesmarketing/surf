@@ -9,9 +9,10 @@ import * as B from './breaks.js';
 import * as AI from './ai.js';
 import * as U from './ui.js';
 import { SprayFX } from './particles.js';
-import { Ocean, Curl, createSky, createLights, createRig, SUN } from './render.js';
+import { Ocean, Curl, createSky, createLights, createRig, SUN, PAL } from './render.js';
 import * as SFX from './sfx.js';
 import { World } from './world.js';
+import * as E from './elements.js';
 
 const SUB = 1 / 120;          // the sim always steps at a fixed 120 Hz
 const MAX_FRAME = 0.1;
@@ -39,6 +40,10 @@ const camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, 0.1, 50
 createSky(scene);
 createLights(scene);
 const ocean = new Ocean(scene);
+// ⚠️ THREE copies a Color passed to a material constructor rather than keeping the
+// reference, so the horizon backdrop did NOT retint with the palette — a lava sky
+// over an ocean-blue horizon band. Share the instance explicitly.
+ocean.far.material.color = PAL.deep;
 const curl = new Curl(scene);
 const fx = new SprayFX(scene);
 const world = new World(scene);
@@ -112,6 +117,7 @@ let t, rider, run, trickState;
 // `run` is one wave; `session` is the whole outing.
 let mode = 'free';
 let heat = null, rival = null, breakId = 'home';
+let elementId = localStorage.getItem('surf-element') || 'water';
 let session = newSession();
 const career = loadCareer();
 const ui = new U.UI();
@@ -122,10 +128,26 @@ function newSession() {
            clean: 0, wipeouts: 0, waves: 0, waveScores: [] };
 }
 
+/**
+ * Retint the entire scene for a medium. This works by MUTATING the PAL colour
+ * instances, because ocean, curl and sky all hold references to the same
+ * THREE.Color objects in their uniforms — one setHex reaches all three materials.
+ * No shaders are edited and no new uniforms exist per element; if a new element
+ * seems to need one, it is a new renderer, not an element (see elements.js).
+ */
+function applyElementView(elm) {
+  for (const k of ['deep', 'shallow', 'glow', 'sky', 'horizon', 'sunCol', 'foam', 'zenith', 'low']) {
+    if (PAL[k] && elm.pal[k] !== undefined) PAL[k].setHex(elm.pal[k]);
+  }
+  scene.fog.color.setHex(elm.fog);
+  fx.setElement(elm);
+}
+
 function startWave(i) {
   const bk = B.byId(breakId);
   const preset = bk.waves[Math.max(0, Math.min(bk.waves.length - 1, i))];
-  W.applyWave(B.waveParams(breakId, i));
+  E.applyElement(E.byId(elementId), B.waveParams(breakId, i));
+  applyElementView(E.byId(elementId));
   session.wave = i;
   session.done = false;
   t = 4.0;
@@ -140,7 +162,7 @@ function startWave(i) {
     combo: 1, comboT: 0, topSpeed: 0, over: false, msg: '', msgT: 0,
     wasBarrel: false, wasAir: false, barrelSeg: 0,
   };
-  world.setBreak(breakId);
+  world.setBreak(elementId === 'water' ? breakId : E.byId(elementId).world);
   el('over').classList.remove('show');
   ui.hide();
   el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`;
@@ -159,6 +181,10 @@ function beginSession(m, opts) {
   heat = opts.heat || null;
   rival = opts.rival || null;
   breakId = opts.breakId;
+  if (opts.element) { elementId = opts.element; localStorage.setItem('surf-element', elementId); }
+  // The tour and contests are judged on WATER — objectives and rival scores were
+  // tuned there, and a low-gravity cosmic heat would trivialise every air goal.
+  if (m !== 'free') elementId = 'water';
   session = newSession();
   started = true;
   el('intro').classList.add('gone');
@@ -200,8 +226,9 @@ const screens = {
     play: (h) => beginSession('tour', { heat: h, breakId: h.breakId }),
     back: screens.home,
   }),
-  free: () => U.breakScreen(ui, B.BREAKS, career, B, {
-    play: (b) => beginSession('free', { breakId: b.id }),
+  free: () => U.breakScreen(ui, B.BREAKS, career, B, E, elementId, {
+    play: (b, el) => beginSession('free', { breakId: b.id, element: el }),
+    pick: (el) => { elementId = el; localStorage.setItem('surf-element', el); screens.free(); },
     back: screens.home,
   }),
   contest: () => U.contestScreen(ui, AI.RIVALS, B.BREAKS, career, B, {
@@ -369,7 +396,7 @@ function simulateRival(r, bid, count) {
   const scores = [];
   const bk = B.byId(bid);
   for (let i = 0; i < count; i++) {
-    W.applyWave(B.waveParams(bid, Math.min(i, bk.waves.length - 1)));
+    E.applyElement(E.byId(elementId), B.waveParams(bid, Math.min(i, bk.waves.length - 1)));
     let ts = 4.0;
     const rr = createRider(ts);
     const sp = takeoffSpot(ts);
@@ -399,7 +426,7 @@ function simulateRival(r, bid, count) {
     // Skill scales the result a little, so the ladder actually ramps.
     scores.push(sc * (0.72 + 0.42 * r.skill));
   }
-  W.applyWave(B.waveParams(bid, session.wave));   // restore the player's wave
+  E.applyElement(E.byId(elementId), B.waveParams(bid, session.wave));   // restore the player's wave
   return scores;
 }
 
@@ -585,7 +612,7 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 // ---------------------------------------------------------------- debug handles
-window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat, rival,
+window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat, rival, elementId,
                          breakId, screens, ui, world, fx, ocean, curl,
                          renderer, scene, camera, THREE });
 window.__surfRestart = restart;

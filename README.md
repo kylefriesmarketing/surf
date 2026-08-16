@@ -65,6 +65,31 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M4 — the elements (2026-08-12)
+Five media in `elements.js`, picked on the free-surf screen and unlocked on the
+star ladder: **WATER · LAVA (6★) · SAND (2★) · SNOW (4★) · COSMIC (9★)**. An
+element is not a reskin — each moves real physics (drag, grip, gravity, pace,
+foam grace), and the identity assertions in `elements: every medium is rideable`
+pin the differences: snow is the fastest, lava the slowest, cosmic hangs in the
+air longest. The tour and contests deliberately stay on water — objectives and
+rival scores were tuned there, and a low-gravity cosmic heat would trivialise
+every air goal.
+
+⚠️ **A heavy medium must slow the CHASE, not just the rider.** Lava caps the board
+at ~15 m/s and the later waves peel at 13–16, so lava and sand shipped their first
+draft unrideable on 6 of 8 probed break waves — the best possible line was outrun
+by its own wave in 5–21 s. `paceScale` on the element scales the break's peel
+speed; the outer-bank rule (sustainable trim speed sets the peel ceiling) applies
+per medium.
+
+⚠️ **THREE.js COPIES a Color passed to a material constructor** — it does not keep
+the reference. The whole element retint works by mutating the shared `PAL` colour
+instances (ocean, curl and sky all hold the same objects in their uniforms), and
+the one material that broke this rule was the horizon backdrop plane: it kept its
+construction-time copy and drew an ocean-blue band across the lava world. Fixed by
+assigning `ocean.far.material.color = PAL.deep` after construction. If a new
+material should follow the palette, share the instance explicitly.
+
 ### M2 — the set
 Five waves, each bigger and faster-peeling than the last (`SET` in `wave.js`,
 applied by `setWave()` which mutates `WAVE` in place). Score accumulates across the

@@ -134,6 +134,17 @@ const DRESSING = {
            boats: 1, birds: 2, clouds: 12, landColor: 0x2f3538, far: -300 },
   outer: { land: { count: 4,  wMin: 40, wMax: 90, hMin: 12, hMax: 30, spread: 900, depth: 300, sink: 14 },
            boats: 4, birds: 2, clouds: 24, landColor: 0x333c40, far: -760 },
+
+  // Element worlds. Same machinery, different casts: no fishing boats on a lava
+  // flow, no gulls in the void. The land silhhouettes do most of the storytelling.
+  volcano: { land: { count: 7, wMin: 40, wMax: 110, hMin: 30, hMax: 85, spread: 700, depth: 300, sink: 6 },
+             boats: 0, birds: 0, clouds: 20, landColor: 0x180a06, far: -520 },
+  dunes:   { land: { count: 12, wMin: 40, wMax: 120, hMin: 8, hMax: 30, spread: 900, depth: 380, sink: 3 },
+             boats: 0, birds: 2, clouds: 8, landColor: 0x8a6b3c, far: -560 },
+  peaks:   { land: { count: 9, wMin: 30, wMax: 80, hMin: 35, hMax: 95, spread: 800, depth: 320, sink: 4 },
+             boats: 0, birds: 1, clouds: 26, landColor: 0xcfdce6, far: -600 },
+  void:    { land: { count: 5, wMin: 25, wMax: 70, hMin: 20, hMax: 60, spread: 900, depth: 400, sink: -18 },
+             boats: 0, birds: 0, clouds: 30, landColor: 0x241a45, far: -700, stars: 1400 },
 };
 
 export class World {
@@ -216,6 +227,36 @@ export class World {
       this.birds.push(bird);
     }
 
+    // A star shell, for worlds with no atmosphere to hide one. Static points on a
+    // far sphere, sized so a handful genuinely stand out; it rides with the camera
+    // via the same follow logic as the clouds (stars must never parallax).
+    if (d.stars) {
+      const n = d.stars;
+      const pos = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        // Upper hemisphere only, biased away from the horizon band.
+        const a = rand() * Math.PI * 2;
+        const y = 0.06 + Math.pow(rand(), 0.6) * 0.94;
+        const rxz = Math.sqrt(Math.max(0, 1 - y * y));
+        const R = 1900;
+        pos[i * 3] = Math.cos(a) * rxz * R;
+        pos[i * 3 + 1] = y * R;
+        pos[i * 3 + 2] = Math.sin(a) * rxz * R;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+      const mat = new THREE.PointsMaterial({ color: 0xd8d2ff, size: 2.6,
+        sizeAttenuation: false, transparent: true, opacity: 0.85, fog: false,
+        depthWrite: false });
+      const stars = new THREE.Points(geo, mat);
+      stars.renderOrder = -90;
+      this.root.add(stars);
+      this.stars = stars;
+    } else {
+      this.stars = null;
+    }
+
     for (let i = 0; i < d.clouds; i++) {
       const mat = new THREE.SpriteMaterial({ map: this.cloudTex, transparent: true,
         opacity: 0.30 + rand() * 0.35, depthWrite: false, fog: false });
@@ -270,5 +311,9 @@ export class World {
       if (u.x > 1400) u.x = -1400;
       c.position.set(riderX + u.x, u.y, crestZ + u.z);
     }
+
+    // Stars are at optical infinity: they translate WITH the viewpoint, so they
+    // never parallax however far the ride goes.
+    if (this.stars) this.stars.position.set(riderX, 0, crestZ);
   }
 }

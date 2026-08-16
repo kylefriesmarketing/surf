@@ -154,14 +154,41 @@ export function tourScreen(ui, TOUR, career, B, cb) {
   ]);
 }
 
-export function breakScreen(ui, BREAKS, career, B, cb) {
+// What each medium asks of you, one line each, shown under the picker.
+const ELEMENT_NOTES = {
+  water:  'the baseline — everything else bends it',
+  lava:   'slow and heavy · the crust does not forgive',
+  sand:   'loose rails, everything is a drift',
+  snow:   'fast and clean · edges bite hard',
+  cosmic: 'low gravity · airs last long enough to think in',
+};
+
+export function breakScreen(ui, BREAKS, career, B, E, elementId, cb) {
+  // The element picker: a chip row above the break list. Elements unlock on the
+  // same star ladder as everything else — water free, then one every few stars.
+  const gates = { water: 0, sand: 2, snow: 4, lava: 6, cosmic: 9 };
+  const chips = document.createElement('div');
+  chips.className = 'menu';
+  chips.style.flexDirection = 'row';
+  chips.style.flexWrap = 'wrap';
+  chips.style.justifyContent = 'center';
+  for (const elm of E.LIST) {
+    const locked = career.stars < (gates[elm.id] ?? 0);
+    const c = ui.btn(elm.name, null, locked ? `${gates[elm.id]}★` : null,
+      () => cb.pick(elm.id), { disabled: locked, primary: elm.id === elementId });
+    c.style.flex = '0 1 auto';
+    c.style.padding = '10px 16px';
+    chips.appendChild(c);
+  }
+  const note = `<div class="tag" style="margin-top:14px">${ELEMENT_NOTES[elementId] || ''}</div>`;
+
   const rows = BREAKS.map((b) => {
     const open = B.breakUnlocked(career, b);
     return ui.btn(b.name, `${b.sub} · ${b.waves.length} waves`,
       open ? `${b.waves.length}` : `needs ${B.starsToUnlock(b.unlockAt)}★`,
-      () => cb.play(b), { disabled: !open });
+      () => cb.play(b, elementId), { disabled: !open });
   });
-  ui.show(['<h2>FREE SURF</h2>', ui.menu(rows), ui.back('← BACK', cb.back)]);
+  ui.show(['<h2>FREE SURF</h2>', chips, note, ui.menu(rows), ui.back('← BACK', cb.back)]);
 }
 
 export function contestScreen(ui, RIVALS, BREAKS, career, B, cb) {

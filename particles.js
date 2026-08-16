@@ -62,6 +62,7 @@ void main() {
 const FRAG = `
 uniform sampler2D uTex;
 uniform float uOpacity;
+uniform vec3 uTint;
 varying float vLife;
 varying vec3 vCol;
 void main() {
@@ -72,7 +73,8 @@ void main() {
   float fout = smoothstep(0.0, 0.34, vLife);
   float a = t.a * uOpacity * fin * fout;
   if (a < 0.004) discard;
-  gl_FragColor = vec4(vCol * t.rgb, a);
+  // uTint is the medium: white spray, orange embers, ochre dust, violet motes.
+  gl_FragColor = vec4(vCol * uTint * t.rgb, a);
 }`;
 
 export class Pool {
@@ -93,6 +95,7 @@ export class Pool {
     this.drag = o.drag ?? 0.6;
     this.surface = o.surface ?? 'kill';
     this.stride = o.stride ?? 3;
+    this.g0 = this.g; this.drag0 = this.drag; this.lifeScale = 1;
     this.count = 0;
     this.frame = 0;
     this.buoy = o.buoy ?? 0;
@@ -121,6 +124,7 @@ export class Pool {
         uTex: { value: sprite(o.hard) },
         uScale: { value: 620 },
         uOpacity: { value: o.opacity ?? 1 },
+        uTint: { value: new THREE.Vector3(1, 1, 1) },
       },
       vertexShader: VERT,
       fragmentShader: FRAG,
@@ -146,6 +150,7 @@ export class Pool {
     }
     this.px[i] = x; this.py[i] = y; this.pz[i] = z;
     this.vx[i] = vx; this.vy[i] = vy; this.vz[i] = vz;
+    life *= this.lifeScale;
     this.life[i] = life; this.max_[i] = life;
     this.aSize[i] = size;
     const c = i * 3;
@@ -248,6 +253,24 @@ export class SprayFX {
   setViewport(heightPx, fovDeg) {
     const s = heightPx / (2 * Math.tan((fovDeg * Math.PI / 180) / 2));
     for (const p of this.pools) p.mat.uniforms.uScale.value = s;
+  }
+
+  /**
+   * Re-medium the spray. Gravity and drag scale RELATIVE to each pool's own
+   * construction values (mist, drops and foam deliberately differ), so embers
+   * arc, dust hangs, powder billows and motes barely fall — while the pools keep
+   * their identities. Everything already in the air keeps its old ballistics for
+   * its last second of life, which reads as weather changing, not a reset.
+   */
+  setElement(el) {
+    const gf = el.sprayGravity / 9.81;
+    const df = el.sprayDrag / 1.35;
+    for (const p of this.pools) {
+      p.g = p.g0 * gf;
+      p.drag = p.drag0 * df;
+      p.lifeScale = el.sprayLife;
+      p.mat.uniforms.uTint.value.set(el.tint[0], el.tint[1], el.tint[2]);
+    }
   }
 
   /**

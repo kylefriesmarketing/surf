@@ -33,6 +33,7 @@ const PAL = {
   sky:     new THREE.Color(0x81969e),
   horizon: new THREE.Color(0x69787b),
   sunCol:  new THREE.Color(0xffedca),
+  foam:    new THREE.Color(0xf0f8fa),
   zenith:  new THREE.Color(0x172630),
   low:     new THREE.Color(0x69787b),
 };
@@ -53,7 +54,7 @@ void main() {
 }`;
 
 const OCEAN_FRAG = `
-uniform vec3 uSun, uSunCol, uDeep, uShallow, uGlow, uSky, uHorizon, uCam;
+uniform vec3 uSun, uSunCol, uDeep, uShallow, uGlow, uSky, uHorizon, uFoam, uCam;
 uniform float uTime;
 varying vec3 vW;
 varying vec3 vN;
@@ -113,7 +114,7 @@ void main() {
   float fm = clamp(vFoam * 1.3 - 0.10, 0.0, 1.0);
   fm *= 0.12 + 0.88 * churn;
   fm = clamp(fm, 0.0, 1.0);
-  col = mix(col, vec3(0.94, 0.975, 1.0), fm);
+  col = mix(col, uFoam, fm);
 
   float d = length(uCam - vW);
   col = mix(col, uHorizon, smoothstep(85.0, 205.0, d));
@@ -172,7 +173,8 @@ export class Ocean {
         uSun: { value: SUN }, uSunCol: { value: PAL.sunCol },
         uDeep: { value: PAL.deep }, uShallow: { value: PAL.shallow },
         uGlow: { value: PAL.glow }, uSky: { value: PAL.sky },
-        uHorizon: { value: PAL.horizon }, uCam: { value: new THREE.Vector3() },
+        uHorizon: { value: PAL.horizon }, uFoam: { value: PAL.foam },
+        uCam: { value: new THREE.Vector3() },
         uTime: { value: 0 },
       },
       vertexShader: OCEAN_VERT,
@@ -286,7 +288,8 @@ export class Curl {
         uSun: { value: SUN }, uSunCol: { value: PAL.sunCol },
         uDeep: { value: PAL.deep }, uShallow: { value: PAL.shallow },
         uGlow: { value: PAL.glow }, uSky: { value: PAL.sky },
-        uHorizon: { value: PAL.horizon }, uCam: { value: new THREE.Vector3() },
+        uHorizon: { value: PAL.horizon }, uFoam: { value: PAL.foam },
+        uCam: { value: new THREE.Vector3() },
         uTime: { value: 0 },
       },
       vertexShader: OCEAN_VERT,
