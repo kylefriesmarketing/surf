@@ -65,6 +65,27 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M5 — the rival is on your wave (2026-08-12)
+Contests are no longer judged against an offline simulation: the rival is a second
+full rider (same `board.js`, same 120 Hz steps, same scoring rules, own trick
+detector) driven by `ai.js`, visible on your wave on a dark board, throwing its own
+rail spray. Their wave ends when they wipe, when the point runs out, or when your
+wave does; skill scales their banked score so the ladder ramps. Seeded per wave, so
+a rematch replays the same rival ride against a better you. `stepRivalOne()` in
+game.js is the whole thing; the old `simulateRival` is deleted.
+
+⚠️ `SprayFX.wake()` has a SHARED accumulator — a second caller halves everyone's
+wake. `rail()` is per-call probabilistic and safe to call for any number of riders.
+That is why the rival gets rail spray but no wake.
+
+Wipeouts also play out now: the rig tumbles with a random spin, churns the surface
+and sinks into the foam, and the score card waits 1.5 s (0.4 s on a clean end)
+instead of snatching the screen at the moment of impact.
+
+Audio is element-voiced: the same four noise beds, per-medium multipliers
+(`EL_PROFILES` in sfx.js) — lava is a low rumble with almost no wind, snow is
+nearly all wind, cosmic is quiet and far away. Still never heard by a human.
+
 ### M4 — the elements (2026-08-12)
 Five media in `elements.js`, picked on the free-surf screen and unlocked on the
 star ladder: **WATER · LAVA (6★) · SAND (2★) · SNOW (4★) · COSMIC (9★)**. An

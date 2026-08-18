@@ -73,21 +73,37 @@ export function setMuted(m) { if (master) master.gain.value = m ? 0 : 0.85; }
 
 const at = (p, v, tc = 0.08) => { if (p) p.setTargetAtTime(v, ac.currentTime, tc); };
 
+// Per-element voicing of the same four noise beds. The medium changes what the
+// world SOUNDS like riding it: lava is a low rumble with almost no wind, snow is
+// nearly all wind, cosmic is quiet and muffled, sand is a dry granular hiss.
+// Multipliers on the water baseline so frame() stays one code path.
+const EL_PROFILES = {
+  water:  { roarF: 1.00, roarG: 1.0, windG: 1.0, swellF: 1.00, swellG: 1.0 },
+  lava:   { roarF: 0.42, roarG: 1.6, windG: 0.35, swellF: 0.50, swellG: 1.5 },
+  sand:   { roarF: 1.45, roarG: 0.8, windG: 1.70, swellF: 1.30, swellG: 0.6 },
+  snow:   { roarF: 1.10, roarG: 0.6, windG: 2.10, swellF: 1.15, swellG: 0.5 },
+  cosmic: { roarF: 0.60, roarG: 0.45, windG: 0.50, swellF: 0.40, swellG: 0.8 },
+};
+let prof = EL_PROFILES.water;
+
+export function setElement(id) { prof = EL_PROFILES[id] || EL_PROFILES.water; }
+
 /**
  * Continuous state, driven straight off the rider each frame.
  * @param s {foam, slide, speed, barrel, down}
  */
 export function frame(s) {
   if (!ready) return;
-  at(nodes.roar.g.gain, 0.02 + s.foam * 0.42, 0.10);
-  at(nodes.roar.f.frequency, 420 + s.foam * 900, 0.15);
+  at(nodes.roar.g.gain, (0.02 + s.foam * 0.42) * prof.roarG, 0.10);
+  at(nodes.roar.f.frequency, (420 + s.foam * 900) * prof.roarF, 0.15);
   at(nodes.hiss.g.gain, Math.min(0.16, s.slide * 0.010), 0.05);
-  at(nodes.wind.g.gain, Math.min(0.075, Math.max(0, s.speed - 5) * 0.0075), 0.12);
+  at(nodes.wind.g.gain, Math.min(0.075, Math.max(0, s.speed - 5) * 0.0075) * prof.windG, 0.12);
   at(nodes.wind.f.frequency, 700 + s.speed * 90, 0.15);
   // Inside the tube the world goes muffled and close.
   const cut = s.down ? 500 : s.barrel > 0.5 ? 700 : 20000;
   at(nodes.tube.frequency, cut, 0.12);
-  at(nodes.swell.g.gain, s.barrel > 0.5 ? 0.30 : 0.10, 0.2);
+  at(nodes.swell.g.gain, (s.barrel > 0.5 ? 0.30 : 0.10) * prof.swellG, 0.2);
+  at(nodes.swell.f.frequency, 340 * prof.swellF, 0.3);
 }
 
 /** One-shots. */

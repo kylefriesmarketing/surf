@@ -50,6 +50,14 @@ const world = new World(scene);
 
 const rig = createRig(scene);
 
+// The rival's rig. In a contest the opponent is not a simulation you read about on
+// the results card — they are ON the wave with you, a second rider stepped by the
+// same board.js at the same fixed rate, driven by ai.js. Dark board so you can tell
+// whose line is whose at a glance.
+const rivalRig = createRig(scene);
+rivalRig.board.material.color.setHex(0x23282e);
+rivalRig.root.visible = false;
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -125,7 +133,52 @@ const ui = new U.UI();
 function newSession() {
   return { wave: 0, total: 0, log: [], best: loadBest(), done: false,
            dist: 0, barrel: 0, tubes: 0, tricks: 0, airs: 0, topSpeed: 0,
-           clean: 0, wipeouts: 0, waves: 0, waveScores: [] };
+           clean: 0, wipeouts: 0, waves: 0, waveScores: [], rivalScores: [] };
+}
+
+// The live rival: a full rider + brain + trick detector, stepped alongside yours.
+let rivalR = null, rivalBrain = null, rivalTrickState = null, rivalRun = null;
+
+function startRival(i) {
+  rivalR = createRider(t);
+  const s2x = takeoffSpot(t).x + 14;          // ahead of you, down the line
+  rivalR.p.x = s2x; rivalR.p.z = W.crestZ(s2x, t) - 3.5;
+  rivalR.p.y = W.height(rivalR.p.x, rivalR.p.z, t);
+  rivalR.v.x = 5; rivalR.v.z = -1;
+  // Seeded per wave, so a rematch replays the same rival ride against a better you.
+  rivalBrain = AI.createAI(rival, 1000 + i * 97);
+  rivalTrickState = createTrickState();
+  rivalRun = { score: 0, combo: 1, comboT: 0, seg: 0, wasB: false,
+               announced: false, done: false, x0: rivalR.p.x, wipeT: 0 };
+}
+
+/**
+ * One 120 Hz step of the rival: same physics, same scoring rules as yours, no HUD.
+ * Their wave ends when they wipe, when the point runs out, or when your wave does.
+ */
+function stepRivalOne() {
+  if (!rivalR || rivalRun.done) return;
+  if (rivalR.down) { rivalRun.wipeT += SUB; return; }
+  const ev = stepRider(rivalR, t, AI.aiInput(rivalBrain, rivalR, W, t, SUB), SUB);
+  const rv = rivalRun;
+  rv.score += SUB * rivalR.speed * (0.55 + rivalR.pocket * 1.9) * rv.combo;
+  if (rivalR.barrel > 0.5) {
+    rv.score += SUB * 130 * rv.combo; rv.comboT = 2.2; rv.seg += SUB;
+    if (!rv.wasB) rv.combo = Math.min(8, rv.combo + 1);
+    rv.wasB = true;
+  } else {
+    if (rv.wasB) rv.score += rv.seg * 260;
+    rv.seg = 0; rv.wasB = false;
+  }
+  for (const m of updateTricks(rivalTrickState, rivalR, ev, t, SUB)) {
+    rv.score += m.points * rv.combo;
+    rv.combo = Math.min(8, rv.combo + (m.points >= 250 ? 0.7 : 0.4));
+    rv.comboT = m.hold;
+  }
+  rv.comboT -= SUB;
+  if (rv.comboT <= 0) rv.combo = Math.max(1, rv.combo - SUB * 1.1);
+  if (rivalR.down && !rv.announced) { rv.announced = true; flash(`${rival.name} IS DOWN`); }
+  if (rivalR.p.x - rv.x0 > WAVE.rideLength) rv.done = true;
 }
 
 /**
@@ -141,6 +194,7 @@ function applyElementView(elm) {
   }
   scene.fog.color.setHex(elm.fog);
   fx.setElement(elm);
+  SFX.setElement(elm.id);
 }
 
 function startWave(i) {
@@ -163,9 +217,19 @@ function startWave(i) {
     wasBarrel: false, wasAir: false, barrelSeg: 0,
   };
   world.setBreak(elementId === 'water' ? breakId : E.byId(elementId).world);
+
+  if (mode === 'contest' && rival) {
+    startRival(i);
+    rivalRig.root.visible = true;
+  } else {
+    rivalR = null;
+    rivalRig.root.visible = false;
+  }
+
   el('over').classList.remove('show');
   ui.hide();
-  el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`;
+  el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`
+    + (mode === 'contest' && rival ? ` · VS ${rival.name}` : '');
   flash(preset.name);
 }
 
@@ -300,6 +364,13 @@ function finish(reason) {
                      dist: run.dist, barrel: run.barrelTime });
   session.waveScores.push(run.score);
 
+  // The rival's wave ends when yours does; their score is whatever they banked.
+  // Skill scales the raw number so the ladder ramps — the same factor the offline
+  // simulation used, now applied to a ride you actually watched.
+  if (mode === 'contest' && rivalR) {
+    session.rivalScores.push(rivalRun.score * (0.72 + 0.42 * rival.skill));
+  }
+
   // Roll this wave into the session totals the objectives are judged against.
   const wiped = reason !== 'THE WAVE RUNS OUT';
   session.waves++;
@@ -312,21 +383,34 @@ function finish(reason) {
   session.clean += wiped ? 0 : 1;
   session.topSpeed = Math.max(session.topSpeed, run.topSpeed);
 
-  const last = session.wave >= waveCount() - 1;
-  session.done = last;
+  session.done = session.wave >= waveCount() - 1;
 
-  if (last) { endSession(); return; }
+  // A wipeout plays out before the card: the rig tumbles, the camera hangs back,
+  // and THEN you get told what it cost. An instant card on top of a crash reads
+  // like the game snatching the screen away from its own best moment.
+  run.wipeT = 0;
+  run.wipeSpin = wiped ? { x: 2.5 + Math.random() * 4, z: 3 + Math.random() * 5 } : null;
+  run.cardT = wiped ? 1.5 : 0.5;
+}
+
+/** The deferred half of finish(): show the between-wave card, or end the outing. */
+function presentCard() {
+  if (session.done) { endSession(); return; }
 
   {
     // Between waves: this wave's card, then paddle back out for the next one.
-    el('ov-title').textContent = reason;
+    el('ov-title').textContent = run.reason;
     el('ov-score').textContent = Math.round(run.score).toLocaleString();
+    const rivalLine = (mode === 'contest' && session.rivalScores.length)
+      ? `<div><b>${AI.judgeWave(session.rivalScores[session.rivalScores.length - 1]).toFixed(1)}</b>` +
+        ` — ${rival.name}'s wave (yours ${AI.judgeWave(run.score).toFixed(1)})</div>`
+      : '';
     el('ov-lines').innerHTML =
       `<div><b>${run.dist.toFixed(0)}</b> m ridden · <b>${run.tricks}</b> manoeuvre${run.tricks === 1 ? '' : 's'}</div>` +
       `<div><b>${run.barrelTime.toFixed(1)}</b> s barrelled · ${run.tubes} tube${run.tubes === 1 ? '' : 's'}</div>` +
-      `<div><b>${(run.topSpeed * 3.6).toFixed(0)}</b> km/h top speed</div>` +
+      `<div><b>${(run.topSpeed * 3.6).toFixed(0)}</b> km/h top speed</div>` + rivalLine +
       `<div class="best">SET TOTAL ${Math.round(session.total).toLocaleString()}</div>`;
-    const nextName = B.byId(breakId).waves[session.wave + 1].name;
+    const nextName = B.byId(breakId).waves[Math.min(session.wave + 1, B.byId(breakId).waves.length - 1)].name;
     el('ov-again').textContent = `PRESS R FOR WAVE ${session.wave + 2} — ${nextName}`;
   }
   el('over').classList.add('show');
@@ -356,12 +440,12 @@ function endSession() {
   }
 
   if (mode === 'contest' && rival) {
-    // The rival surfs the SAME waves, headlessly and deterministically, so the heat
-    // is a like-for-like comparison rather than a number pulled out of the air.
-    const theirRaw = simulateRival(rival, breakId, AI.COUNTING_WAVES);
+    // Judged on the waves the rival actually rode next to you — the live rider
+    // replaced the old offline simulation, so the number on this card is a ride
+    // you watched happen (or watched fail).
     const you = { waves: session.waveScores.map(AI.judgeWave),
                   total: 0 };
-    const them = { waves: theirRaw.map(AI.judgeWave), total: 0 };
+    const them = { waves: session.rivalScores.map(AI.judgeWave), total: 0 };
     you.total = AI.heatScore(you.waves);
     them.total = AI.heatScore(them.waves);
     career.lifetime.waves += 0;
@@ -387,48 +471,6 @@ function endSession() {
   el('over').classList.add('show');
 }
 
-/**
- * Run the rival's waves at full sim rate with no rendering. It is the same
- * board.js, the same wave, and the same trick detector the player uses — the only
- * difference is who is holding the controls.
- */
-function simulateRival(r, bid, count) {
-  const scores = [];
-  const bk = B.byId(bid);
-  for (let i = 0; i < count; i++) {
-    E.applyElement(E.byId(elementId), B.waveParams(bid, Math.min(i, bk.waves.length - 1)));
-    let ts = 4.0;
-    const rr = createRider(ts);
-    const sp = takeoffSpot(ts);
-    rr.p.x = sp.x; rr.p.z = sp.z; rr.p.y = W.height(sp.x, sp.z, ts);
-    rr.v.x = 5; rr.v.z = -1;
-    const brain = AI.createAI(r, 1000 + i * 97);
-    const tk = createTrickState();
-    let sc = 0, combo = 1, comboT = 0, seg = 0, wasB = false;
-    const x0 = rr.p.x;
-    for (let k = 0; k < 9000; k++) {
-      const ev = stepRider(rr, ts, AI.aiInput(brain, rr, W, ts, SUB), SUB);
-      sc += SUB * rr.speed * (0.55 + rr.pocket * 1.9) * combo;
-      if (rr.barrel > 0.5) { sc += SUB * 130 * combo; comboT = 2.2; seg += SUB;
-        if (!wasB) combo = Math.min(8, combo + 1); wasB = true; }
-      else { if (wasB) sc += seg * 260; seg = 0; wasB = false; }
-      for (const m of updateTricks(tk, rr, ev, ts, SUB)) {
-        sc += m.points * combo;
-        combo = Math.min(8, combo + (m.points >= 250 ? 0.7 : 0.4));
-        comboT = m.hold;
-      }
-      comboT -= SUB;
-      if (comboT <= 0) combo = Math.max(1, combo - SUB * 1.1);
-      ts += SUB;
-      if (rr.down) break;
-      if (rr.p.x - x0 > WAVE.rideLength) break;
-    }
-    // Skill scales the result a little, so the ladder actually ramps.
-    scores.push(sc * (0.72 + 0.42 * r.skill));
-  }
-  E.applyElement(E.byId(elementId), B.waveParams(bid, session.wave));   // restore the player's wave
-  return scores;
-}
 
 // ---------------------------------------------------------------- camera
 const camPos = new THREE.Vector3(0, 6, 20);
@@ -508,7 +550,8 @@ function updateHUD(dt) {
   const pos = Math.max(0, Math.min(1, (lag + 30) / 45));
   el('pip').style.left = (pos * 100) + '%';
   const zone = lag > 8 ? 'foam' : lag > 1 ? 'tube' : lag > -12 ? 'pocket' : 'shoulder';
-  el('zone').textContent = zone.toUpperCase();
+  const FOAM_WORD = { water: 'FOAM', lava: 'CRUST', sand: 'SLIDE', snow: 'DEBRIS', cosmic: 'COLLAPSE' };
+  el('zone').textContent = zone === 'foam' ? (FOAM_WORD[elementId] || 'FOAM') : zone.toUpperCase();
   el('zone').className = zone;
 
   el('msg').textContent = run.msgT > 0 ? run.msg : '';
@@ -545,8 +588,18 @@ function frame(dt, override) {
       agg.splash = Math.max(agg.splash, ev.splash);
       if (ev.wiped) agg.wiped = ev.wiped;
       score(SUB, ev);
+      // The rival rides the same wave in the same fixed steps, and pauses with
+      // you — a card on screen freezes both surfers, not just yours.
+      if (mode === 'contest') stepRivalOne();
     }
     t += SUB;
+  }
+
+  // The deferred end-of-wave card (finish() sets the delay; a wipeout gets time
+  // to actually play out on screen before the score interrupts it).
+  if (run.over && run.cardT !== undefined) {
+    run.cardT -= dt;
+    if (run.cardT <= 0) { run.cardT = undefined; presentCard(); }
   }
 
   if (agg.pumped > 0.3) SFX.hit('pump', Math.min(1, agg.pumped / 6));
@@ -567,6 +620,13 @@ function frame(dt, override) {
     fx.rail(p.x, p.y, p.z, fhx, fhz, agg.slide, rider.speed, dt);
     fx.wake(p.x, p.y, p.z, fhx, fhz, rider.speed, dt);
   }
+  // The rival's carves throw spray too — rail() has no shared timer, so a second
+  // caller is safe (wake() is NOT: its accumulator is shared, so the rival skips it).
+  if (rivalR && !rivalR.down && !rivalR.air) {
+    fx.rail(rivalR.p.x, rivalR.p.y, rivalR.p.z,
+            Math.cos(rivalR.heading), Math.sin(rivalR.heading),
+            rivalR.slide || 0, rivalR.speed, dt);
+  }
   fx.lip(W.breakX(t), (x) => W.crestZ(x, t), (x) => W.lipHeight(x, t), p.x, dt, 1);
   fx.whitewater(W.breakX(t), (x) => W.crestZ(x, t), p.x, dt, 260);
   fx.update(dt, heightAt, -1.5, 0.6);
@@ -581,15 +641,47 @@ function frame(dt, override) {
   // resize the renderer without touching the window.
   fx.setViewport(renderer.domElement.height, camera.fov);
 
+  // One pose routine for every rider on the wave: pitch the board along the slope
+  // it is actually sitting on, so it noses down the drop and levels in the trough.
+  const poseOnWave = (rg, r) => {
+    const fx2 = Math.cos(r.heading), fz2 = Math.sin(r.heading);
+    rg.root.position.set(r.p.x, r.p.y + 0.07, r.p.z);
+    const hf = W.height(r.p.x + fx2 * 0.9, r.p.z + fz2 * 0.9, t);
+    const hb = W.height(r.p.x - fx2 * 0.9, r.p.z - fz2 * 0.9, t);
+    rg.pose(r.heading, r.lean, r.crouch, -Math.atan2(hf - hb, 1.8), 0);
+  };
+
   if (rig) {
-    rig.root.visible = !run.over || run.overT < 0.4;
-    rig.root.position.set(p.x, p.y + 0.07, p.z);
-    // Pitch the board along the slope it is actually sitting on, so it noses down
-    // the drop and levels out in the trough.
-    const hf = W.height(p.x + fhx * 0.9, p.z + fhz * 0.9, t);
-    const hb = W.height(p.x - fhx * 0.9, p.z - fhz * 0.9, t);
-    const pitch = Math.atan2(hf - hb, 1.8);
-    rig.pose(rider.heading, rider.lean, rider.crouch, -pitch, 0);
+    if (rider.down && run.wipeSpin) {
+      // The wipeout: the rig tumbles with the blow, churns the surface, and sinks
+      // into the foam. pose() resets root rotation every call, so the tumble owns
+      // the rig for this stretch and pose is not called at all.
+      run.wipeT += dt;
+      const w = run.wipeT;
+      rig.root.visible = w < 1.6;
+      rig.root.position.set(p.x, Math.max(rider.surfaceY - w * 0.55, p.y - 1.2), p.z);
+      rig.root.rotation.x += run.wipeSpin.x * dt * Math.max(0.15, 1 - w * 0.55);
+      rig.root.rotation.z += run.wipeSpin.z * dt * Math.max(0.15, 1 - w * 0.55);
+      if (w < 1.0 && Math.random() < dt * 9) {
+        fx.splash(p.x + (Math.random() - 0.5) * 1.5, rider.surfaceY,
+                  p.z + (Math.random() - 0.5) * 1.5, 3.5);
+      }
+    } else {
+      rig.root.visible = true;
+      poseOnWave(rig, rider);
+    }
+  }
+
+  if (rivalR && rivalRig.root.visible) {
+    if (rivalR.down) {
+      // The rival's crash is simpler: topple and sink where they fell.
+      rivalRig.root.visible = rivalRun.wipeT < 1.6;
+      rivalRig.root.position.set(rivalR.p.x,
+        Math.max(rivalR.surfaceY - rivalRun.wipeT * 0.55, rivalR.p.y - 1.2), rivalR.p.z);
+      rivalRig.root.rotation.z += 3.2 * dt * Math.max(0.15, 1 - rivalRun.wipeT * 0.55);
+    } else {
+      poseOnWave(rivalRig, rivalR);
+    }
   }
 
   SFX.frame({ foam: rider.foam, slide: agg.slide, speed: rider.speed,
@@ -613,6 +705,7 @@ requestAnimationFrame(loop);
 
 // ---------------------------------------------------------------- debug handles
 window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat, rival, elementId,
+                         rivalR, rivalRun, rivalRig,
                          breakId, screens, ui, world, fx, ocean, curl,
                          renderer, scene, camera, THREE });
 window.__surfRestart = restart;
