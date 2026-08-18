@@ -167,12 +167,28 @@ export function judge(heat, totals) {
 export function newCareer() {
   return { heats: {}, stars: 0, bestSet: 0, lifetime: {
     waves: 0, dist: 0, barrel: 0, tubes: 0, tricks: 0, airs: 0, wipeouts: 0, topSpeed: 0,
-  } };
+  }, elements: {} };
 }
 
 /** Fold a finished heat into career state. Idempotent on stars: a heat only ever
- *  contributes its BEST result, so replaying a heat badly cannot cost you progress. */
-export function recordHeat(career, heat, results, totals) {
+ *  contributes its BEST result, so replaying a heat badly cannot cost you progress.
+ *  `elementId` buckets the same totals per medium, so the records screen can show
+ *  your best lava set next to your best water one. Old saves have no `elements`
+ *  key — the caller's load path defaults it, and this function re-defaults it too
+ *  because a save from before M4 can arrive here by any route. */
+export function recordHeat(career, heat, results, totals, elementId = 'water') {
+  if (!career.elements) career.elements = {};
+  const eb = career.elements[elementId] ||
+    (career.elements[elementId] = { waves: 0, dist: 0, barrel: 0, tubes: 0,
+                                    tricks: 0, airs: 0, topSpeed: 0, best: 0 });
+  eb.waves += totals.waves || 0;
+  eb.dist += Math.round(totals.dist || 0);
+  eb.barrel = +(eb.barrel + (totals.barrel || 0)).toFixed(1);
+  eb.tubes += totals.tubes || 0;
+  eb.tricks += totals.tricks || 0;
+  eb.airs += totals.airs || 0;
+  eb.topSpeed = Math.max(eb.topSpeed, totals.topSpeed || 0);
+  eb.best = Math.max(eb.best, Math.round(totals.total || 0));
   const stars = results.filter((r) => r.met).length;
   const prev = career.heats[heat.id];
   if (!prev || stars > prev.stars || (stars === prev.stars && totals.total > prev.score)) {

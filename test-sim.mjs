@@ -731,5 +731,56 @@ group('elements: every medium is rideable');
   ok('and the wave is back to defaults', WAVE.A === waveBefore.A && WAVE.c === waveBefore.c);
 }
 
+
+group('lineup: the bomb is still a wave');
+{
+  // The lineup offers a bigger wave for a score multiplier. A × 1.13 pushes every
+  // wave past its designed size, and oversized amplitude is exactly how the risk
+  // gradient collapses (the M2 finding) — so the WORST case, each break's biggest
+  // wave scaled up, has to stay survivable on a good line and lethal on a greedy
+  // one, or the bomb is either a cutscene or a free multiplier.
+  const before = W.waveDefaults();
+  let broken = [];
+  for (const b of B.BREAKS) {
+    const wi = b.waves.length - 1;
+    const params = B.waveParams(b.id, wi);
+    params.A *= 1.13;
+    E.applyElement(E.byId('water'), params);
+    const safe = ride(7200, breakPolicy(() => -14));
+    const greedy = ride(7200, breakPolicy(() => 9));
+    if (safe.r.down || safe.log.dist < 200 || !greedy.r.down) {
+      broken.push(`${b.id}: safe=${safe.log.dist.toFixed(0)}m/${safe.r.downReason || 'ok'} greedy=${greedy.r.downReason || 'ALIVE'}`);
+    }
+  }
+  ok('every break\'s biggest wave survives a ×1.13 bomb scale', broken.length === 0,
+     broken.join(' | '));
+  W.applyWave(before);
+}
+
+group('records: per-element buckets');
+{
+  const c = B.newCareer();
+  const totals = { total: 4200, dist: 300, barrel: 3, tubes: 1, tricks: 2, airs: 1,
+                   topSpeed: 12, clean: 1, waves: 3, wipeouts: 2 };
+  B.recordHeat(c, { id: 'x1', goals: [] }, [], totals, 'lava');
+  B.recordHeat(c, { id: 'x2', goals: [] }, [], { ...totals, total: 900 }, 'lava');
+  B.recordHeat(c, { id: 'x3', goals: [] }, [], { ...totals, total: 7000 }, 'snow');
+  B.recordHeat(c, { id: 'x4', goals: [] }, [], totals);          // defaults to water
+
+  ok('media accumulate separately', c.elements.lava.waves === 6 && c.elements.snow.waves === 3,
+     JSON.stringify(Object.keys(c.elements)));
+  ok('best set per medium keeps the max, not the last',
+     c.elements.lava.best === 4200 && c.elements.snow.best === 7000,
+     `lava=${c.elements.lava.best} snow=${c.elements.snow.best}`);
+  ok('the elementId default is water', c.elements.water && c.elements.water.waves === 3);
+  ok('lifetime still counts everything', c.lifetime.waves === 12, `${c.lifetime.waves}`);
+
+  // A pre-M4 save has no `elements` key at all; recordHeat must not explode on it.
+  const old = B.newCareer();
+  delete old.elements;
+  B.recordHeat(old, { id: 'x5', goals: [] }, [], totals, 'cosmic');
+  ok('a pre-elements save is healed in place', old.elements.cosmic.waves === 3);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -225,7 +225,39 @@ export function statsScreen(ui, career, TOUR, cb) {
     cell('TOP SPEED', `${(L.topSpeed * 3.6).toFixed(0)} km/h`) +
     cell('BEST SET', career.bestSet.toLocaleString()) +
     cell('STARS', `${career.stars} / ${TOUR.reduce((a, h) => a + h.goals.length, 0)}`);
-  ui.show(['<h2>RECORDS</h2>', grid, ui.back('← BACK', cb.back)]);
+
+  // The per-medium ledger. Only media you have actually ridden get a row — an
+  // empty table would just advertise the unlock list twice.
+  const els = Object.entries(career.elements || {}).filter(([, v]) => v.waves > 0);
+  const tbl = document.createElement('div');
+  if (els.length) {
+    tbl.style.cssText = 'width:min(760px,92vw);margin-top:26px';
+    tbl.innerHTML =
+      `<div class="heatrow" style="opacity:.55"><span>MEDIUM</span>` +
+      `<span>waves · km · barrel · best set · top speed</span></div>` +
+      els.map(([id, v]) =>
+        `<div class="heatrow"><span><b>${id.toUpperCase()}</b></span>` +
+        `<span>${v.waves} · ${(v.dist / 1000).toFixed(1)} · ${v.barrel.toFixed(0)}s` +
+        ` · <b>${v.best.toLocaleString()}</b> · ${(v.topSpeed * 3.6).toFixed(0)} km/h</span></div>`).join('');
+  }
+  ui.show(['<h2>RECORDS</h2>', grid, ...(els.length ? [tbl] : []), ui.back('← BACK', cb.back)]);
+}
+
+/**
+ * The lineup: pick your wave instead of being handed one. Three characters of the
+ * same section — take the small one now, wait for the set wave, or gamble on the
+ * bomb. The multiplier prices the risk; the size scale IS the risk.
+ */
+export function lineupScreen(ui, offers, waveNo, waveTotal, cb) {
+  const rows = offers.map((o) => ui.btn(
+    o.tag, o.note, o.mult === 1 ? null : `×${o.mult.toFixed(1)}`,
+    () => cb.take(o), { primary: o.mult === 1 }));
+  ui.show([
+    '<h2>THE LINEUP</h2>',
+    `<div class="tag">WAVE ${waveNo} OF ${waveTotal} — PICK YOUR WAVE</div>`,
+    ui.menu(rows),
+    ui.back('← ABANDON THE SESSION', cb.abandon),
+  ]);
 }
 
 export function resultsScreen(ui, heat, results, totals, earned, cb) {

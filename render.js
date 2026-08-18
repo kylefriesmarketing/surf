@@ -515,8 +515,19 @@ export function createRig(scene) {
       body.rotation.z = -lean * .46; body.rotation.x = .08 + crouch * .30;
       body.scale.y = 1 - crouch * .20; body.position.y = .06 - crouch * .055;
       armL.rotation.z = .72 + lean * .18; armR.rotation.z = -.86 + lean * .18;
+      armL.rotation.x = 0; armR.rotation.x = 0;
       legF.rotation.x = .48 + crouch * .26; legB.rotation.x = -.40 - crouch * .18;
     },
+    /** Prone paddling: windmill the arms. Called AFTER pose() during the paddle-in
+     *  (pose resets the joints each frame, so this composes on top). */
+    paddle(ph) {
+      const s = Math.sin(ph * 7);
+      armL.rotation.x = s * 1.35; armL.rotation.z = .22;
+      armR.rotation.x = -s * 1.35; armR.rotation.z = -.22;
+      legF.rotation.x = .08; legB.rotation.x = -.08;
+    },
+    /** Kit colour, so the rival is tellable from you beyond the dark board. */
+    setAccent(hex) { suitPanel.color.setHex(hex); },
   };
 }
 

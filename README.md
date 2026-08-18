@@ -65,6 +65,26 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M6 — the lineup, the paddle-in, and the per-medium ledger (2026-08-12)
+Waves are no longer handed to you in order. Before every wave THE LINEUP offers
+three characters of the next section — THE INSIDE (A ×0.88, scores ×0.9), THE SET
+WAVE (as designed), THE BOMB (A ×1.13, scores ×1.25) — and the choice is the
+gameplay: the multiplier prices the risk, the size IS the risk.
+`lineup: the bomb is still a wave` pins the worst case (every break's biggest
+wave ×1.13) as survivable-but-punishing, because oversized amplitude is exactly
+how the risk gradient collapses (the M2 finding).
+
+Every wave now opens with a ~1.3 s paddle-in: prone on the deck, arms
+windmilling, gliding in as the section stands up, control at the pop-up.
+⚠️ Scripted, not simulated — and the glide targets track `takeoffSpot(t)` LIVE,
+because the wave moves ~15 m during the paddle and a start point captured at
+wave-start hands you over into the foam. Distance counts from the pop-up.
+
+RECORDS gains a per-medium ledger: each element buckets its own waves, distance,
+barrel time, best set and top speed (`recordHeat` takes an `elementId`, defaults
+water, heals pre-M4 saves in place). The rival now wears a rust-red kit via
+`rig.setAccent()`, and `rig.paddle(phase)` windmills the arms during the paddle.
+
 ### M5 — the rival is on your wave (2026-08-12)
 Contests are no longer judged against an offline simulation: the rival is a second
 full rider (same `board.js`, same 120 Hz steps, same scoring rules, own trick

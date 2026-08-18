@@ -56,6 +56,7 @@ const rig = createRig(scene);
 // whose line is whose at a glance.
 const rivalRig = createRig(scene);
 rivalRig.board.material.color.setHex(0x23282e);
+rivalRig.setAccent(0xc4452b);   // rust-red kit vs your slate panels
 rivalRig.root.visible = false;
 
 addEventListener('resize', () => {
@@ -197,10 +198,12 @@ function applyElementView(elm) {
   SFX.setElement(elm.id);
 }
 
-function startWave(i) {
+function startWave(i, offer) {
   const bk = B.byId(breakId);
   const preset = bk.waves[Math.max(0, Math.min(bk.waves.length - 1, i))];
-  E.applyElement(E.byId(elementId), B.waveParams(breakId, i));
+  const params = B.waveParams(breakId, i);
+  if (offer && offer.scale !== 1) params.A = params.A * offer.scale;
+  E.applyElement(E.byId(elementId), params);
   applyElementView(E.byId(elementId));
   session.wave = i;
   session.done = false;
@@ -215,6 +218,9 @@ function startWave(i) {
     barrelTime: 0, tubes: 0, airs: 0, tricks: 0,
     combo: 1, comboT: 0, topSpeed: 0, over: false, msg: '', msgT: 0,
     wasBarrel: false, wasAir: false, barrelSeg: 0,
+    mult: (offer && offer.mult) || 1,
+    // The paddle-in: ~1.3 s where the wave picks you up before you have control.
+    paddleT: 1.3,
   };
   world.setBreak(elementId === 'water' ? breakId : E.byId(elementId).world);
 
@@ -231,6 +237,22 @@ function startWave(i) {
   el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`
     + (mode === 'contest' && rival ? ` · VS ${rival.name}` : '');
   flash(preset.name);
+}
+
+function buildOffers() {
+  return [
+    { tag: 'THE INSIDE',   note: 'smaller and safer — take it now',      scale: 0.88, mult: 0.9 },
+    { tag: 'THE SET WAVE', note: 'the proper one, as it comes',          scale: 1.00, mult: 1.0 },
+    { tag: 'THE BOMB',     note: 'bigger and meaner — worth more, costs more', scale: 1.13, mult: 1.25 },
+  ];
+}
+
+/** Show the lineup for wave i, then drop in on whatever gets picked. */
+function showLineup(i) {
+  U.lineupScreen(ui, buildOffers(), i + 1, waveCount(), {
+    take: (o) => startWave(i, o),
+    abandon: () => { el('over').classList.remove('show'); screens.home(); },
+  });
 }
 
 /** How many waves this outing runs for — a heat says so, otherwise the whole break. */
@@ -253,13 +275,13 @@ function beginSession(m, opts) {
   started = true;
   el('intro').classList.add('gone');
   SFX.init(); SFX.resume();
-  startWave(0);
+  showLineup(0);
 }
 
 /** R: next wave if one is waiting, otherwise restart the outing. */
 function restart() {
   if (ui.isOpen()) return;
-  if (run && run.over && !session.done) startWave(session.wave + 1);
+  if (run && run.over && !session.done) { el('over').classList.remove('show'); showLineup(session.wave + 1); return; }
   else { const o = { heat, rival, breakId }; beginSession(mode, o); }
 }
 function loadBest() {
@@ -270,7 +292,8 @@ function loadCareer() {
   try {
     const raw = JSON.parse(localStorage.getItem('surf-career') || 'null');
     if (raw && raw.lifetime && raw.heats) return { ...B.newCareer(), ...raw,
-      lifetime: { ...B.newCareer().lifetime, ...raw.lifetime } };
+      lifetime: { ...B.newCareer().lifetime, ...raw.lifetime },
+      elements: { ...(raw.elements || {}) } };
   } catch { /* a corrupt save must not brick the game */ }
   return B.newCareer();
 }
@@ -311,11 +334,11 @@ function score(dt, ev) {
   // Sitting in the pocket is worth more than racing the shoulder, and the tube is
   // worth a lot more than either. The multiplier is what makes a greedy line pay.
   const pocket = rider.pocket;
-  run.score += dt * rider.speed * (0.55 + pocket * 1.9) * run.combo;
+  run.score += dt * rider.speed * (0.55 + pocket * 1.9) * run.combo * run.mult;
 
   if (rider.barrel > 0.5) {
     run.barrelTime += dt;
-    run.score += dt * 130 * run.combo;
+    run.score += dt * 130 * run.combo * run.mult;
     run.comboT = 2.2;
     if (!run.wasBarrel) {
       run.tubes++; run.combo = Math.min(8, run.combo + 1);
@@ -325,7 +348,7 @@ function score(dt, ev) {
   } else {
     if (run.wasBarrel) {
       flash(`TUBE  +${Math.round(run.barrelSeg * 260)}`);
-      run.score += run.barrelSeg * 260;
+      run.score += run.barrelSeg * 260 * run.mult;
       SFX.hit('spit');
       fx.spit(rider.p.x + 3, rider.p.y + 1.2, rider.p.z - 1, 1.1);
     }
@@ -334,14 +357,14 @@ function score(dt, ev) {
   run.barrelSeg = rider.barrel > 0.5 ? (run.barrelSeg || 0) + dt : 0;
 
   if (ev.slide > 0.5) {
-    run.score += dt * ev.slide * 1.4 * run.combo;
+    run.score += dt * ev.slide * 1.4 * run.combo * run.mult;
     run.comboT = 1.6;
   }
   if (ev.launched) run.airs++;
 
   // Named manoeuvres, recognised from what the board actually did.
   for (const m of updateTricks(trickState, rider, ev, t, dt)) {
-    const pts = Math.round(m.points * run.combo);
+    const pts = Math.round(m.points * run.combo * run.mult);
     run.score += pts;
     run.tricks++;
     run.combo = Math.min(8, run.combo + (m.points >= 250 ? 0.7 : 0.4));
@@ -430,7 +453,7 @@ function endSession() {
 
   if (mode === 'tour' && heat) {
     const results = B.judge(heat, session);
-    B.recordHeat(career, heat, results, session);
+    B.recordHeat(career, heat, results, session, elementId);
     saveCareer();
     U.resultsScreen(ui, heat, results, session, null, {
       retry: () => beginSession('tour', { heat, breakId: heat.breakId }),
@@ -466,7 +489,7 @@ function endSession() {
       `<span class="wr">${w.reason.toLowerCase()}</span></div>`).join('') +
     `<div class="best">${session.newBest ? '★ NEW BEST SET' : 'best set ' + Math.round(session.best).toLocaleString()}</div>`;
   el('ov-again').textContent = 'PRESS R TO PADDLE BACK OUT · ESC FOR THE MENU';
-  B.recordHeat(career, { id: `free-${breakId}`, goals: [] }, [], session);
+  B.recordHeat(career, { id: `free-${breakId}`, goals: [] }, [], session, elementId);
   saveCareer();
   el('over').classList.add('show');
 }
@@ -581,16 +604,44 @@ function frame(dt, override) {
   while (acc >= SUB && guard-- > 0) {
     acc -= SUB;
     if (!run.over) {
-      const ev = stepRider(rider, t, inp, SUB);
-      agg.slide = Math.max(agg.slide, ev.slide);
-      agg.launched = agg.launched || ev.launched;
-      agg.pumped = Math.max(agg.pumped, ev.pumped);
-      agg.splash = Math.max(agg.splash, ev.splash);
-      if (ev.wiped) agg.wiped = ev.wiped;
-      score(SUB, ev);
-      // The rival rides the same wave in the same fixed steps, and pauses with
-      // you — a card on screen freezes both surfers, not just yours.
-      if (mode === 'contest') stepRivalOne();
+      if (run.paddleT > 0) {
+        // The paddle-in. You do not spawn standing on a moving wave — you glide in
+        // from out the back, prone, as the section stands up under you, and get
+        // control at the pop-up. Scripted, not simulated: the targets track
+        // takeoffSpot(t) LIVE, because the wave moves ~15 m during the paddle and
+        // a start point captured at wave-start would hand you over into the foam.
+        run.paddleT -= SUB;
+        const f = 1 - Math.max(0, run.paddleT) / 1.3;
+        const e = f * f * (3 - 2 * f);
+        const sp = takeoffSpot(t);
+        rider.p.x = sp.x - 6 * (1 - e);
+        rider.p.z = sp.z + 7 * (1 - e);
+        rider.p.y = W.height(rider.p.x, rider.p.z, t);
+        rider.heading = -0.45;
+        if (rivalR) {
+          const rx = sp.x + 14 - 5 * (1 - e);
+          rivalR.p.x = rx;
+          rivalR.p.z = W.crestZ(rx, t) - 3.5 + 6 * (1 - e);
+          rivalR.p.y = W.height(rivalR.p.x, rivalR.p.z, t);
+        }
+        if (run.paddleT <= 0) {
+          rider.v.x = 5; rider.v.z = -1;
+          if (rivalR) { rivalR.v.x = 5; rivalR.v.z = -1; rivalRun.x0 = rivalR.p.x; }
+          run.startX = rider.p.x;          // distance counts from the pop-up
+          flash('TO YOUR FEET');
+        }
+      } else {
+        const ev = stepRider(rider, t, inp, SUB);
+        agg.slide = Math.max(agg.slide, ev.slide);
+        agg.launched = agg.launched || ev.launched;
+        agg.pumped = Math.max(agg.pumped, ev.pumped);
+        agg.splash = Math.max(agg.splash, ev.splash);
+        if (ev.wiped) agg.wiped = ev.wiped;
+        score(SUB, ev);
+        // The rival rides the same wave in the same fixed steps, and pauses with
+        // you — a card on screen freezes both surfers, not just yours.
+        if (mode === 'contest') stepRivalOne();
+      }
     }
     t += SUB;
   }
@@ -651,6 +702,15 @@ function frame(dt, override) {
     rg.pose(r.heading, r.lean, r.crouch, -Math.atan2(hf - hb, 1.8), 0);
   };
 
+  // Prone paddle pose: flatten the body onto the deck. pose() has already reset
+  // every joint this frame, so this override composes cleanly on top; the new
+  // rig's paddle() animates the arms and the old box rig simply ignores it.
+  const proneOverride = (rg, ph) => {
+    rg.body.rotation.x = 1.42;
+    rg.body.position.y = -0.02;
+    if (rg.paddle) rg.paddle(ph);
+  };
+
   if (rig) {
     if (rider.down && run.wipeSpin) {
       // The wipeout: the rig tumbles with the blow, churns the surface, and sinks
@@ -669,6 +729,7 @@ function frame(dt, override) {
     } else {
       rig.root.visible = true;
       poseOnWave(rig, rider);
+      if (run.paddleT > 0) proneOverride(rig, t);
     }
   }
 
@@ -681,6 +742,7 @@ function frame(dt, override) {
       rivalRig.root.rotation.z += 3.2 * dt * Math.max(0.15, 1 - rivalRun.wipeT * 0.55);
     } else {
       poseOnWave(rivalRig, rivalR);
+      if (run.paddleT > 0) proneOverride(rivalRig, t + 0.7);
     }
   }
 
