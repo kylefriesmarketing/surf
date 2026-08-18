@@ -482,50 +482,166 @@ export function createRig(scene) {
     fin.position.set(x, -0.10, -0.88); fin.rotation.x = Math.PI; root.add(fin);
   }
 
+  // ------------------------------------------------------------- the surfer
+  //
+  // A JOINTED figure, not a pile of positioned capsules. Every limb hangs from a
+  // pivot group at its anatomical joint (shoulder → elbow → hand, hip → knee →
+  // foot), so when a joint rotates, everything downstream follows — the previous
+  // figure rotated capsules about their own centres while the hands and feet sat
+  // in space as separately-positioned meshes, and under any pose it read as a
+  // scattered doll (captured before rebuilding; see README trap).
+  //
+  // The legs are not posed, they are SOLVED: two-bone IK per leg, knees poled
+  // toward the chest (+x, the side-on stance), foot targets fixed on the deck.
+  // Crouch lowers the pelvis and the knees bend exactly as much as they must for
+  // the feet to stay planted. That single constraint is what makes the figure
+  // read as standing ON the board rather than hovering near it.
+
   const body = new THREE.Group(); body.position.y = 0.06;
   const suit = material(0x0b1114, .48), suitPanel = material(0x202c30, .42);
   const skin = material(0x9d6f58, .76), hair = material(0x161310, .9);
 
-  const torso = capsule(.155, .27, suit, 0, .64, .01, 0, -.05); body.add(torso);
-  const chest = capsule(.128, .11, suitPanel, 0, .68, .09, 0, Math.PI / 2); chest.scale.set(1.05,.7,.62); body.add(chest);
-  const neck = capsule(.052, .055, skin, 0, .86, .02); body.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(.105, 18, 14), skin);
-  head.scale.set(.86, 1.08, .92); head.position.set(0,.98,.035); head.castShadow=true; body.add(head);
-  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(.106, 18, 10, 0, Math.PI * 2, 0, Math.PI * .47), hair);
-  hairCap.scale.copy(head.scale); hairCap.position.set(0,.996,.028); hairCap.castShadow=true; body.add(hairCap);
+  const L1 = 0.34, L2 = 0.36;          // thigh, shin+ankle
+  const FOOT_Y = 0.030;                // sole height above body origin — measured:
+                                       // 0.085 left a constant 5.5 cm hover between
+                                       // sole and deck (probed across 120 frames)
+  const FOOT_F = 0.38, FOOT_B = -0.34; // stance along the board
+  const HIP_STAND = 0.60;
 
-  const armL = capsule(.045, .30, suit, -.235, .67, .08, .72, -.12);
-  const armR = capsule(.045, .31, suit, .245, .69, -.04, -.86, .10);
-  const handL = new THREE.Mesh(new THREE.SphereGeometry(.052,12,9), skin); handL.position.set(-.39,.52,.10);
-  const handR = new THREE.Mesh(new THREE.SphereGeometry(.052,12,9), skin); handR.position.set(.40,.49,-.03);
-  body.add(armL,armR,handL,handR);
+  const pelvis = new THREE.Group();
+  body.add(pelvis);
+  const seat = capsule(.125, .14, suit, 0, .02, 0, Math.PI / 2, 0);
+  seat.scale.set(1, .8, .78); pelvis.add(seat);
 
-  const legF = capsule(.065, .34, suit, -.02, .29, .31, 0, .48);
-  const legB = capsule(.065, .34, suit, .02, .28, -.28, 0, -.40);
-  const footF = capsule(.047, .13, suit, -.02, .10, .55, 0, Math.PI / 2);
-  const footB = capsule(.047, .13, suit, .02, .10, -.51, 0, Math.PI / 2);
-  body.add(legF,legB,footF,footB);
+  // Torso chain: lower torso → chest → neck → head, all children of one group
+  // that pivots at the hips (hunch, side-on turn, lean).
+  const torsoG = new THREE.Group(); torsoG.position.y = 0.06; pelvis.add(torsoG);
+  const belly = capsule(.115, .16, suit, 0, .12, .01); torsoG.add(belly);
+  const chest = capsule(.135, .17, suit, 0, .30, .01); chest.scale.set(1.08, 1, .82); torsoG.add(chest);
+  const panel = capsule(.10, .12, suitPanel, 0, .31, .095, 0, Math.PI / 2);
+  panel.scale.set(1.15, .62, .5); torsoG.add(panel);
+  const neck = capsule(.048, .05, skin, 0, .455, .01); torsoG.add(neck);
+  const headG = new THREE.Group(); headG.position.set(0, .55, .01); torsoG.add(headG);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(.095, 18, 14), skin);
+  skull.scale.set(.88, 1.06, .94); skull.castShadow = true; headG.add(skull);
+  const hairCap = new THREE.Mesh(
+    new THREE.SphereGeometry(.098, 18, 10, 0, Math.PI * 2, 0, Math.PI * .52), hair);
+  hairCap.scale.copy(skull.scale); hairCap.position.y = .012; hairCap.castShadow = true;
+  headG.add(hairCap);
+
+  // Arm chain: shoulder pivot → upper arm → elbow pivot → forearm → hand.
+  function makeArm(side) {                 // side: -1 left, +1 right
+    const sh = new THREE.Group(); sh.position.set(side * .175, .40, .01); torsoG.add(sh);
+    const upper = capsule(.042, .20, suit, 0, -.12, 0); sh.add(upper);
+    const el = new THREE.Group(); el.position.y = -.25; sh.add(el);
+    const fore = capsule(.036, .18, suit, 0, -.11, 0); el.add(fore);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(.046, 12, 9), skin);
+    hand.position.y = -.235; hand.castShadow = true; el.add(hand);
+    return { sh, el };
+  }
+  const armL = makeArm(-1), armR = makeArm(1);
+
+  // Leg chain: hip pivot → thigh → knee pivot → shin → flat foot.
+  function makeLeg(sx) {
+    const hip = new THREE.Group(); hip.position.set(sx, -.02, 0); pelvis.add(hip);
+    const thigh = capsule(.062, L1 - .12, suit, 0, -L1 / 2, 0); hip.add(thigh);
+    const knee = new THREE.Group(); knee.position.y = -L1; hip.add(knee);
+    const shin = capsule(.05, L2 - .14, suit, 0, -L2 / 2 + .02, 0); knee.add(shin);
+    const footG = new THREE.Group(); footG.position.y = -L2 + .045; knee.add(footG);
+    const foot = capsule(.042, .12, suit, 0, -.02, .045, 0, Math.PI / 2); footG.add(foot);
+    return { hip, knee, footG };
+  }
+  const legF = makeLeg(-.085), legB = makeLeg(.085);
+
+  // --- the leg solver ---------------------------------------------------------
+  const _S = new THREE.Vector3(), _T = new THREE.Vector3(), _dir = new THREE.Vector3();
+  const _axis = new THREE.Vector3(), _axisL = new THREE.Vector3();
+  const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _qh = new THREE.Quaternion();
+  const _DOWN = new THREE.Vector3(0, -1, 0);
+  const _POLE = new THREE.Vector3(1, 0, .15).normalize();   // knees toward the chest
+
+  function solveLeg(leg, sx, footZ) {
+    // Socket and target in pelvis space; only the pelvis height varies.
+    _S.set(sx, -.02, 0);
+    _T.set(sx * 1.5, FOOT_Y - pelvis.position.y, footZ).sub(_S);
+    let d = _T.length();
+    const reach = L1 + L2 - .015;
+    if (d > reach) { _T.multiplyScalar(reach / d); d = reach; }
+    const cosA = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
+    const cosB = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
+    const a = Math.acos(Math.max(-1, Math.min(1, cosA)));
+    const bend = Math.PI - Math.acos(Math.max(-1, Math.min(1, cosB)));
+    _dir.copy(_T).normalize();
+    _axis.crossVectors(_dir, _POLE).normalize();
+    if (!Number.isFinite(_axis.x) || _axis.lengthSq() < 1e-8) _axis.set(0, 0, 1);
+    _q1.setFromUnitVectors(_DOWN, _dir);
+    _q2.setFromAxisAngle(_axis, a);
+    leg.hip.quaternion.copy(_q2).multiply(_q1);
+    _qh.copy(leg.hip.quaternion).invert();
+    _axisL.copy(_axis).applyQuaternion(_qh);
+    leg.knee.quaternion.setFromAxisAngle(_axisL, -bend);
+    // The foot stays flat on the deck whatever the leg above it did.
+    leg.footG.quaternion.copy(leg.knee.quaternion).premultiply(leg.hip.quaternion).invert();
+  }
 
   root.add(body); scene.add(root);
+
   return {
     root, body, board,
     pose(heading, lean, crouch, pitch, roll) {
-      root.rotation.set(0,0,0); root.rotation.y = -heading + Math.PI / 2;
+      root.rotation.set(0, 0, 0); root.rotation.y = -heading + Math.PI / 2;
       root.rotateX(pitch); root.rotateZ(roll - lean * .30);
-      body.rotation.z = -lean * .46; body.rotation.x = .08 + crouch * .30;
-      body.scale.y = 1 - crouch * .20; body.position.y = .06 - crouch * .055;
-      armL.rotation.z = .72 + lean * .18; armR.rotation.z = -.86 + lean * .18;
-      armL.rotation.x = 0; armR.rotation.x = 0;
-      legF.rotation.x = .48 + crouch * .26; legB.rotation.x = -.40 - crouch * .18;
+      // Belt and braces: nothing outside this rig may leave residue on the body
+      // group between frames.
+      body.rotation.set(0, 0, 0); body.position.set(0, .06, 0);
+
+      pelvis.position.set(lean * .06, HIP_STAND - crouch * .20, 0);
+      pelvis.rotation.set(0, 0, 0);
+
+      // Side-on stance: chest opens toward +x, head counter-turns to look down
+      // the line, everything hunches a little more the lower you get.
+      torsoG.rotation.set(.16 + crouch * .40, -.50 + lean * .22, -lean * .48);
+      headG.rotation.set(-(.14 + crouch * .38) * .7, .46 - lean * .12, lean * .14);
+
+      armL.sh.rotation.set(-lean * .85 + crouch * .22, 0, .72 + Math.abs(lean) * .38 + crouch * .18);
+      armR.sh.rotation.set(lean * .85 + crouch * .28, 0, -.78 - Math.abs(lean) * .42 - crouch * .18);
+      armL.el.rotation.set(-.30 - crouch * .28, 0, .06);
+      armR.el.rotation.set(-.34 - crouch * .28, 0, -.06);
+
+      solveLeg(legF, -.085, FOOT_F);
+      solveLeg(legB, .085, FOOT_B);
     },
-    /** Prone paddling: windmill the arms. Called AFTER pose() during the paddle-in
-     *  (pose resets the joints each frame, so this composes on top). */
-    paddle(ph) {
-      const s = Math.sin(ph * 7);
-      armL.rotation.x = s * 1.35; armL.rotation.z = .22;
-      armR.rotation.x = -s * 1.35; armR.rotation.z = -.22;
-      legF.rotation.x = .08; legB.rotation.x = -.08;
+
+    /**
+     * Prone on the deck, paddling. Replaces pose() for the paddle-in — the whole
+     * figure lies down via the pelvis, the legs trail straight, and the arms do
+     * an alternating crawl stroke. The hands FOLLOW the arms now, which is the
+     * entire point of the joint hierarchy.
+     */
+    setProne(ph) {
+      pelvis.position.set(0, .175, .15);
+      pelvis.rotation.set(Math.PI / 2 - .16, 0, 0);
+      torsoG.rotation.set(-.20, 0, 0);          // chest arched up off the deck
+      headG.rotation.set(-.92, 0, 0);           // eyes down the line
+
+      // Legs trail behind, nearly straight, toes pointed.
+      for (const [leg, sx] of [[legF, -.085], [legB, .085]]) {
+        leg.hip.quaternion.setFromAxisAngle(_axis.set(1, 0, 0), -.10 + sx * .6);
+        leg.knee.quaternion.setFromAxisAngle(_axis.set(1, 0, 0), .16);
+        leg.footG.quaternion.setFromAxisAngle(_axis.set(1, 0, 0), .9);
+      }
+
+      // The crawl: shoulders windmill in anti-phase, elbows soften on recovery.
+      const s = Math.sin(ph * 7), c = Math.cos(ph * 7);
+      armL.sh.rotation.set(1.35 + s * .80, 0, .30);
+      armR.sh.rotation.set(1.35 - s * .80, 0, -.30);
+      armL.el.rotation.set(-.48 - Math.max(0, c) * .5, 0, 0);
+      armR.el.rotation.set(-.48 - Math.max(0, -c) * .5, 0, 0);
     },
+
+    /** Back-compat alias — game.js calls paddle() on rigs that predate setProne. */
+    paddle(ph) { this.setProne(ph); },
+
     /** Kit colour, so the rival is tellable from you beyond the dark board. */
     setAccent(hex) { suitPanel.color.setHex(hex); },
   };

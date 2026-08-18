@@ -706,6 +706,11 @@ function frame(dt, override) {
   // every joint this frame, so this override composes cleanly on top; the new
   // rig's paddle() animates the arms and the old box rig simply ignores it.
   const proneOverride = (rg, ph) => {
+    // The jointed rig lies down through its own hierarchy. Do NOT touch rg.body
+    // here — pose() does not reset the body group, so a body-level rotation
+    // sticks after the paddle and leaves the figure surfing lying down (shipped
+    // exactly that way for about twenty minutes).
+    if (rg.setProne) { rg.setProne(ph); return; }
     rg.body.rotation.x = 1.42;
     rg.body.position.y = -0.02;
     if (rg.paddle) rg.paddle(ph);

@@ -65,6 +65,29 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M7 — the rider is a body, not a pile of parts (2026-08-18)
+The figure was rebuilt as a JOINTED skeleton: pivot groups at every anatomical
+joint (shoulder → elbow → hand, hip → knee → foot), so rotating a joint carries
+everything downstream. The legs are not posed, they are **solved** — two-bone IK
+per leg with knees poled toward the chest, foot targets fixed on the deck — so
+crouching lowers the pelvis and the knees bend exactly as much as they must for
+the feet to stay planted.
+
+⚠️ Traps this rebuild found, all of which will regress silently if reintroduced:
+1. **Limbs positioned absolutely instead of parented at joints.** The old figure
+   rotated capsules about their own centres while hands and feet sat in space as
+   separate meshes — under any pose it read as a scattered doll (captured in
+   `shots/surf-rig-before.png`).
+2. **Body-group residue.** `pose()` must reset `body` rotation/position every
+   frame. game.js's prone override used to rotate the body group directly, pose()
+   never cleared it, and the figure surfed the whole wave lying down.
+3. **Measure the sole gap, don't eyeball it.** The feet hovered a constant 5.5 cm
+   above the deck; probed by transforming every body-mesh bounding-box corner
+   into root space over 120 frames, then closed with one number (FOOT_Y). Now
+   3 mm.
+Prone paddling goes through `rig.setProne(phase)` (the whole figure lies down via
+its own hierarchy and the hands FOLLOW the crawl stroke); `paddle()` is an alias.
+
 ### M6 — the lineup, the paddle-in, and the per-medium ledger (2026-08-12)
 Waves are no longer handed to you in order. Before every wave THE LINEUP offers
 three characters of the next section — THE INSIDE (A ×0.88, scores ×0.9), THE SET
