@@ -178,6 +178,7 @@ function stepRivalOne() {
   }
   rv.comboT -= SUB;
   if (rv.comboT <= 0) rv.combo = Math.max(1, rv.combo - SUB * 1.1);
+  if (ev.landed > 1) rivalR._absorb = Math.min(1, ev.landed / 9);
   if (rivalR.down && !rv.announced) { rv.announced = true; flash(`${rival.name} IS DOWN`); }
   if (rivalR.p.x - rv.x0 > WAVE.rideLength) rv.done = true;
 }
@@ -654,7 +655,11 @@ function frame(dt, override) {
   }
 
   if (agg.pumped > 0.3) SFX.hit('pump', Math.min(1, agg.pumped / 6));
-  if (agg.splash > 1) { fx.splash(rider.p.x, rider.p.y, rider.p.z, agg.splash); SFX.hit('land', agg.splash); }
+  if (agg.splash > 1) {
+    fx.splash(rider.p.x, rider.p.y, rider.p.z, agg.splash);
+    SFX.hit('land', agg.splash);
+    rider._absorb = Math.min(1, agg.splash / 9);
+  }
   if (agg.wiped) {
     fx.splash(rider.p.x, rider.p.y, rider.p.z, 14);
     SFX.hit('splash', 12);
@@ -663,6 +668,12 @@ function frame(dt, override) {
   }
 
   run.msgT -= dt;
+  for (const rr of [rider, rivalR]) {
+    if (!rr) continue;
+    if (rr.air) rr._absorb = 0;   // a phantom absorb must not squash the air pose
+    else if (rr._absorb) rr._absorb = Math.max(0, rr._absorb - dt * 3.4);
+    if (!rr.air && rr._airK) rr._airK = Math.max(0, rr._airK - dt * 7);
+  }
 
   // --- emitters, all driven by sim quantities
   const p = rider.p;
@@ -697,9 +708,34 @@ function frame(dt, override) {
   const poseOnWave = (rg, r) => {
     const fx2 = Math.cos(r.heading), fz2 = Math.sin(r.heading);
     rg.root.position.set(r.p.x, r.p.y + 0.07, r.p.z);
-    const hf = W.height(r.p.x + fx2 * 0.9, r.p.z + fz2 * 0.9, t);
-    const hb = W.height(r.p.x - fx2 * 0.9, r.p.z - fz2 * 0.9, t);
-    rg.pose(r.heading, r.lean, r.crouch, -Math.atan2(hf - hb, 1.8), 0);
+    // On the water the board pitches to the slope under it. In the AIR that is
+    // nonsense — it made the flying board track the water it was not touching —
+    // so airborne pitch comes from the trajectory instead: nose up on the way
+    // out, nose down into the landing.
+    let pitch;
+    if (r.air) {
+      pitch = Math.atan2(r.v.y, Math.max(5, Math.hypot(r.v.x, r.v.z))) * 0.6;
+    } else {
+      const hf = W.height(r.p.x + fx2 * 0.9, r.p.z + fz2 * 0.9, t);
+      const hb = W.height(r.p.x - fx2 * 0.9, r.p.z - fz2 * 0.9, t);
+      pitch = -Math.atan2(hf - hb, 1.8);
+    }
+    // A hard landing flashes a deep absorb through the legs, then releases.
+    const crouch = Math.min(1, r.crouch + (r._absorb || 0));
+    rg.pose(r.heading, r.lean, crouch, pitch, 0);
+    // The blend needs an EXIT ramp as much as an entry: handing the compressed
+    // air pose straight back to the standing pose popped the pelvis 16 cm in a
+    // single frame at touchdown (measured, not eyeballed). _airK keeps decaying
+    // for ~0.15 s after landing so the body arrives instead of teleporting.
+    if (rg.setAir) {
+      if (r.air) {
+        r._airK = Math.min(1, r.airTime / 0.18);
+        r._airExt = r.v.y < 0 ? Math.min(1, -r.v.y / 5.5) : 0;
+        rg.setAir(r._airK, r._airExt, r.spin);
+      } else if (r._airK > 0) {
+        rg.setAir(r._airK, 1, 0);
+      }
+    }
   };
 
   // Prone paddle pose: flatten the body onto the deck. pose() has already reset

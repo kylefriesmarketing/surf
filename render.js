@@ -642,6 +642,50 @@ export function createRig(scene) {
     /** Back-compat alias — game.js calls paddle() on rigs that predate setProne. */
     paddle(ph) { this.setProne(ph); },
 
+    /**
+     * Airborne overlay, applied AFTER pose() each frame (the setProne pattern).
+     * Blends the standing stance toward a compressed air shape by k, then toward
+     * a legs-extended landing shape by ext — both drive continuously from
+     * airTime and vertical speed, so the blend cannot pop.
+     *
+     *   k    0..1  how deep into the air pose (ramps in over the first ~0.2 s)
+     *   ext  0..1  landing extension (ramps with descent speed)
+     *   spin rad   accumulated rotation — twists the torso ahead of the board
+     *
+     * ⚠️ Anything that moves the pelvis MUST re-run the leg solver afterwards.
+     * pose() solved the legs for the pelvis height it set; move the pelvis and
+     * keep those knees and the feet detach from the deck — the exact class of
+     * bug this rig was rebuilt to kill.
+     */
+    setAir(k, ext, spin) {
+      if (k <= 0) return;
+      const mix = (cur, tgt) => cur + (tgt - cur) * k;
+
+      // Compress toward the board, then let the legs reach back out to land.
+      const hipTarget = .40 + ext * .17;
+      pelvis.position.y = mix(pelvis.position.y, hipTarget);
+
+      // Torso: more upright than the riding hunch, twisted ahead of a spin.
+      const tw = Math.max(-.6, Math.min(.6, spin * .55));
+      torsoG.rotation.x = mix(torsoG.rotation.x, .02 + ext * .10);
+      torsoG.rotation.y = mix(torsoG.rotation.y, -.50 + tw);
+      headG.rotation.x = mix(headG.rotation.x, .18);      // eyes on the landing
+
+      // Lead arm reaches down toward the rail (the grab), trail arm swings high
+      // for balance; both widen out as the landing comes up.
+      armL.sh.rotation.x = mix(armL.sh.rotation.x, .70 - ext * .55);
+      armL.sh.rotation.z = mix(armL.sh.rotation.z, .18 + ext * .75);
+      armL.el.rotation.x = mix(armL.el.rotation.x, -.95 + ext * .60);
+      armR.sh.rotation.x = mix(armR.sh.rotation.x, -.55 + ext * .35);
+      armR.sh.rotation.z = mix(armR.sh.rotation.z, -1.45 + ext * .45);
+      armR.el.rotation.x = mix(armR.el.rotation.x, -.18);
+
+      // Feet stay on the deck — the board hangs from them, which is why the
+      // compression reads as the board tucking up under the rider.
+      solveLeg(legF, -.085, FOOT_F);
+      solveLeg(legB, .085, FOOT_B);
+    },
+
     /** Kit colour, so the rival is tellable from you beyond the dark board. */
     setAccent(hex) { suitPanel.color.setHex(hex); },
   };

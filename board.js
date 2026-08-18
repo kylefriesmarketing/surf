@@ -41,6 +41,7 @@ export const TUNE = {
   launchMax: 8.5,     // hard ceiling on launch speed: ~3.7m of air, ~1.7s hang.
                       // Must stay below landHard or airs are unlandable by design.
   launchMin: 3.4,      // below this you never leave the water at all
+  punchThrough: 0.25,  // ascending this early in a flight passes THROUGH lip water
   launchLambda: 0.9,  // surface support below this and you are off the water
   landHard: 15.0,     // impact speed above which a landing goes wrong. Must clear
                       // launchMax + popImpulse WITH headroom: you land in a trough
@@ -113,7 +114,14 @@ export function stepRider(r, t, input, dt) {
     r.airTime += dt;
 
     const hLand = W.height(p.x, p.z, t);
-    if (p.y <= hLand) {
+    // ⚠️ PUNCH-THROUGH, not landing. A board launched up through the feathering
+    // lip re-intersects the water surface while still ASCENDING at 8+ m/s, and
+    // the plain `p.y <= hLand` check called one frame of that a landing — phantom
+    // impact, splash, landing-absorb and a scored AIR, all inside three frames of
+    // the launch (instrumented frame by frame before fixing). You cannot land on
+    // water you are moving upward through; while climbing in the first beat of a
+    // flight, the lip is spray, and the board carries on.
+    if (p.y <= hLand && (v.y <= 0.5 || r.airTime > TUNE.punchThrough)) {
       p.y = hLand;
       const impact = Math.abs(v.y);
       W.normal(p.x, p.z, t, _n);

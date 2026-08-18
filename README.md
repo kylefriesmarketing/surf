@@ -65,6 +65,25 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M7.1 — pose blending in the air (2026-08-18)
+Airborne, the figure now COMPRESSES — pelvis toward the board, knees folded by the
+same leg IK, lead arm reaching for the rail, trail arm high — then EXTENDS into
+the landing, with a leg absorb flashing on touchdown. Blend factors drive from
+airTime and vertical speed, so they cannot pop; the board pitches with the
+TRAJECTORY while flying (tracking the water it is not touching looked absurd).
+
+⚠️ Two traps out of this pass:
+1. **The blend needs an exit ramp as much as an entry.** Handing the compressed
+   air pose straight back to the standing pose popped the pelvis 16 cm in one
+   frame at touchdown. _airK keeps decaying for ~0.15 s after landing.
+2. **Punch-through, not landing (sim fix in board.js).** A board launched up
+   through the feathering lip re-intersects the surface while still ASCENDING at
+   8+ m/s, and the plain p.y <= h check called one frame of that a landing —
+   phantom impact, splash, absorb and a scored AIR, all within three frames of
+   launch. Instrumented frame-by-frame before fixing: air transitions went 4+ →
+   exactly 2 (one launch, one landing), max frame delta 16.3 cm → 1.85 cm.
+   While climbing early in a flight, lip water is spray; you pass through it.
+
 ### M7 — the rider is a body, not a pile of parts (2026-08-18)
 The figure was rebuilt as a JOINTED skeleton: pivot groups at every anatomical
 joint (shoulder → elbow → hand, hip → knee → foot), so rotating a joint carries
