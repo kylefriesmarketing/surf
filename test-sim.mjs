@@ -782,5 +782,36 @@ group('records: per-element buckets');
   ok('a pre-elements save is healed in place', old.elements.cosmic.waves === 3);
 }
 
+
+group('tricks: the grab');
+{
+  // A grab is a HELD tuck in the air — long enough to be deliberate, fired once
+  // per flight, stacking with the AIR scored on landing.
+  const flight = (inputFn) => {
+    const t0 = 4, x = W.breakX(t0) - 2;
+    const r = createRider(t0);
+    r.p.x = x; r.p.z = W.crestZ(x, t0) - 7; r.p.y = W.height(r.p.x, r.p.z, t0);
+    r.v.x = 5; r.v.z = 16; r.heading = Math.PI / 2 - 0.25;
+    const ts = createTrickState();
+    const fired = {};
+    let t = t0;
+    for (let i = 0; i < 900; i++) {
+      const ev = stepRider(r, t, inputFn(i * DT, r), DT);
+      for (const m of updateTricks(ts, r, ev, t, DT)) fired[m.key] = (fired[m.key] || 0) + 1;
+      t += DT;
+      if (r.down) break;
+    }
+    return fired;
+  };
+  const held = flight((tt, r) => ({ carve: 0, pump: 1, tuck: r.air ? 1 : 0 }));
+  ok('a held tuck in the air is a grab', (held.grab || 0) === 1, JSON.stringify(held));
+  const tap = flight((tt, r) => ({ carve: 0, pump: 1, tuck: r.air && r.airTime < 0.15 ? 1 : 0 }));
+  ok('a tap is not', (tap.grab || 0) === 0, JSON.stringify(tap));
+  const none = flight(() => ({ carve: 0, pump: 1, tuck: 0 }));
+  ok('no tuck, no grab', (none.grab || 0) === 0, JSON.stringify(none));
+  ok('the grab does not replace the landed air', (held.air || 0) + (held.airRev || 0) >= 1,
+     JSON.stringify(held));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

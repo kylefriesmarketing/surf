@@ -657,12 +657,14 @@ export function createRig(scene) {
      * keep those knees and the feet detach from the deck — the exact class of
      * bug this rig was rebuilt to kill.
      */
-    setAir(k, ext, spin) {
+    setAir(k, ext, spin, grab = 0) {
       if (k <= 0) return;
       const mix = (cur, tgt) => cur + (tgt - cur) * k;
 
       // Compress toward the board, then let the legs reach back out to land.
-      const hipTarget = .40 + ext * .17;
+      // A grab pulls everything tighter still: hips right down to the deck and
+      // the lead hand actually on the rail.
+      const hipTarget = .40 - grab * .07 + ext * .17;
       pelvis.position.y = mix(pelvis.position.y, hipTarget);
 
       // Torso: more upright than the riding hunch, twisted ahead of a spin.
@@ -673,9 +675,9 @@ export function createRig(scene) {
 
       // Lead arm reaches down toward the rail (the grab), trail arm swings high
       // for balance; both widen out as the landing comes up.
-      armL.sh.rotation.x = mix(armL.sh.rotation.x, .70 - ext * .55);
-      armL.sh.rotation.z = mix(armL.sh.rotation.z, .18 + ext * .75);
-      armL.el.rotation.x = mix(armL.el.rotation.x, -.95 + ext * .60);
+      armL.sh.rotation.x = mix(armL.sh.rotation.x, .70 + grab * .35 - ext * .55);
+      armL.sh.rotation.z = mix(armL.sh.rotation.z, .18 - grab * .10 + ext * .75);
+      armL.el.rotation.x = mix(armL.el.rotation.x, -.95 - grab * .30 + ext * .60);
       armR.sh.rotation.x = mix(armR.sh.rotation.x, -.55 + ext * .35);
       armR.sh.rotation.z = mix(armR.sh.rotation.z, -1.45 + ext * .45);
       armR.el.rotation.x = mix(armR.el.rotation.x, -.18);

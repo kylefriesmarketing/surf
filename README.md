@@ -65,6 +65,29 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M8 — the grab, and the ghost (2026-08-18)
+Hold TUCK in the air and you are GRABBING — rail hand on the board, hips pulled
+tighter, scored as its own manoeuvre (a real hold, not a tap; once per flight;
+stacks with the AIR scored on landing). Reachability pinned by tests like every
+other trick.
+
+Free surf now races your past self: your best ride on each EXACT wave — break,
+wave index, element and lineup size all in the storage key, because a bomb ghost
+replayed on the inside wave would ride a surface that is not there — replays as a
+translucent rider. No determinism machinery needed: every wave starts at sim
+t = 4.0 and the wave field is a pure function of t, so a position recorded at
+time T sits on the water at time T of any later attempt, by construction.
+Recording is 30 Hz in the fixed sim loop (~12 KB a wave), the HUD names the
+target score, and the ghost vanishes when its wave ended.
+
+⚠️ Ghost materials are CLONED before fading — the rigs share material instances
+per part, and fading the originals ghosts the living riders too.
+⚠️ Driving long test rides from the agent: yield with MessageChannel, never
+setTimeout — the hidden pane clamps chained timers to ~1/min and a 40 s drive
+crawled for minutes (the workspace-wide trap, rediscovered here). And never fire
+a second driver while the first might still be alive: two async loops stepping
+one game interleave into nonsense.
+
 ### M7.1 — pose blending in the air (2026-08-18)
 Airborne, the figure now COMPRESSES — pelvis toward the board, knees folded by the
 same leg IK, lead arm reaching for the rail, trail arm high — then EXTENDS into

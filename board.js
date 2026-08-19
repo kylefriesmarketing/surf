@@ -63,6 +63,7 @@ export function createRider(t = 0) {
     air: false,
     airTime: 0,
     spin: 0,            // accumulated rotation while airborne, for trick scoring
+    grabT: 0,           // how long the rider has held the grab this flight
     // derived, refreshed every step so the view and HUD never recompute physics
     speed: 0, slip: 0, slide: 0, slopeRate: 0, surfaceY: 0,
     foam: 0, foamTime: 0, barrel: 0, pocket: 0,
@@ -112,6 +113,9 @@ export function stepRider(r, t, input, dt) {
     v.x *= ad; v.z *= ad;
     p.x += v.x * dt; p.y += v.y * dt; p.z += v.z * dt;
     r.airTime += dt;
+    // Tuck in the air is a GRAB: reach down and hold the rail. Time it — the
+    // trick detector wants a real hold, not a tap.
+    if (input.tuck) r.grabT += dt; 
 
     const hLand = W.height(p.x, p.z, t);
     // ⚠️ PUNCH-THROUGH, not landing. A board launched up through the feathering
@@ -140,7 +144,7 @@ export function stepRider(r, t, input, dt) {
         v.x *= keep; v.z *= keep;
       }
       v.y = 0;
-      r.air = false; r.airTime = 0; r.spin = 0;
+      r.air = false; r.airTime = 0; r.spin = 0; r.grabT = 0;
     }
     refreshDerived(r, t);
     return ev;
@@ -269,7 +273,7 @@ export function stepRider(r, t, input, dt) {
     if (vy >= TUNE.launchMin) {
       r.air = true;
       v.y = Math.min(TUNE.launchMax, vy);
-      r.airTime = 0; r.spin = 0;
+      r.airTime = 0; r.spin = 0; r.grabT = 0;
       ev.launched = true;
     }
   }

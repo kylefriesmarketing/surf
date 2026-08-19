@@ -59,6 +59,21 @@ rivalRig.board.material.color.setHex(0x23282e);
 rivalRig.setAccent(0xc4452b);   // rust-red kit vs your slate panels
 rivalRig.root.visible = false;
 
+// The ghost: your best ride on this exact wave, replayed as a translucent rider.
+// Materials are CLONED before fading — the rigs share material instances per
+// part, and fading the originals would ghost the living riders too.
+const ghostRig = createRig(scene);
+ghostRig.root.traverse((o) => {
+  if (o.material) {
+    o.material = o.material.clone();
+    o.material.transparent = true;
+    o.material.opacity = 0.28;
+    o.material.depthWrite = false;
+  }
+  o.castShadow = false;
+});
+ghostRig.root.visible = false;
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -139,6 +154,68 @@ function newSession() {
 
 // The live rival: a full rider + brain + trick detector, stepped alongside yours.
 let rivalR = null, rivalBrain = null, rivalTrickState = null, rivalRun = null;
+
+// ---------------------------------------------------------------- the ghost
+//
+// Free surf only. Your best score on this EXACT wave — break, wave index, element
+// and lineup size all in the key, because a ghost recorded on a bomb replayed on
+// the inside wave would ride a surface that is not there. Replay needs no
+// determinism trick: every wave starts at sim t = 4.0 and the wave field is a
+// pure function of t, so a position recorded at sim time T is on the water at
+// sim time T of any later attempt, by construction.
+let ghost = null;      // { dt, t0, d: Float samples [x,y,z,heading,lean,crouch,air] }
+
+const GHOST_STRIDE = 7;
+const ghostKey = (i, offer) =>
+  `surf-ghost:${breakId}:${i}:${elementId}:${offer ? offer.scale : 1}`;
+
+function loadGhost(key) {
+  try {
+    const g = JSON.parse(localStorage.getItem(key) || 'null');
+    if (g && g.d && g.d.length >= GHOST_STRIDE * 10) return g;
+  } catch {}
+  return null;
+}
+
+function saveGhost(key, score) {
+  if (!run.rec || run.rec.data.length < GHOST_STRIDE * 10) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      score: Math.round(score), dt: run.rec.dt, t0: run.rec.t0, d: run.rec.data,
+    }));
+  } catch { /* storage full — the ride still counts, the ghost just isn't kept */ }
+}
+
+/** Sample the player at 30 Hz into the wave recording. */
+function recordGhostSample() {
+  const d = run.rec.data;
+  d.push(+rider.p.x.toFixed(2), +rider.p.y.toFixed(2), +rider.p.z.toFixed(2),
+         +rider.heading.toFixed(3), +rider.lean.toFixed(2), +rider.crouch.toFixed(2),
+         rider.air ? 1 : 0);
+}
+
+// A reusable fake rider for posing the ghost through the same poseOnWave path.
+const ghostR = { p: { x: 0, y: 0, z: 0 }, v: { x: 0, y: 0, z: 0 },
+                 heading: 0, lean: 0, crouch: 0, air: false };
+
+function updateGhost() {
+  if (!ghost || run.over) { ghostRig.root.visible = false; return; }
+  const S = GHOST_STRIDE;
+  const n = (ghost.d.length / S) | 0;
+  const ft = (t - ghost.t0) / ghost.dt;
+  if (ft >= n - 1) { ghostRig.root.visible = false; return; }   // their wave ended
+  const i = Math.max(0, ft | 0), f = Math.max(0, ft - i);
+  const a = i * S, b = Math.min(n - 1, i + 1) * S;
+  const L = (o) => ghost.d[a + o] + (ghost.d[b + o] - ghost.d[a + o]) * f;
+  ghostR.p.x = L(0); ghostR.p.y = L(1); ghostR.p.z = L(2);
+  ghostR.heading = L(3); ghostR.lean = L(4); ghostR.crouch = L(5);
+  ghostR.air = ghost.d[a + 6] > 0.5;
+  // Velocity by finite difference — the airborne pitch needs it.
+  ghostR.v.x = (ghost.d[b] - ghost.d[a]) / ghost.dt;
+  ghostR.v.y = (ghost.d[b + 1] - ghost.d[a + 1]) / ghost.dt;
+  ghostR.v.z = (ghost.d[b + 2] - ghost.d[a + 2]) / ghost.dt;
+  ghostRig.root.visible = true;
+}
 
 function startRival(i) {
   rivalR = createRider(t);
@@ -225,6 +302,12 @@ function startWave(i, offer) {
   };
   world.setBreak(elementId === 'water' ? breakId : E.byId(elementId).world);
 
+  run.offer = offer || null;
+  run.rec = null;
+  run.ghostKey = ghostKey(i, offer);
+  ghost = mode === 'free' ? loadGhost(run.ghostKey) : null;
+  ghostRig.root.visible = false;
+
   if (mode === 'contest' && rival) {
     startRival(i);
     rivalRig.root.visible = true;
@@ -236,7 +319,8 @@ function startWave(i, offer) {
   el('over').classList.remove('show');
   ui.hide();
   el('wave-name').textContent = `${bk.name} · WAVE ${i + 1}/${waveCount()} · ${preset.name}`
-    + (mode === 'contest' && rival ? ` · VS ${rival.name}` : '');
+    + (mode === 'contest' && rival ? ` · VS ${rival.name}` : '')
+    + (ghost ? ` · GHOST ${ghost.score.toLocaleString()}` : '');
   flash(preset.name);
 }
 
@@ -406,6 +490,10 @@ function finish(reason) {
   session.wipeouts += wiped ? 1 : 0;
   session.clean += wiped ? 0 : 1;
   session.topSpeed = Math.max(session.topSpeed, run.topSpeed);
+
+  if (mode === 'free' && run.rec && (!ghost || run.score > ghost.score)) {
+    saveGhost(run.ghostKey, run.score);
+  }
 
   session.done = session.wave >= waveCount() - 1;
 
@@ -629,6 +717,11 @@ function frame(dt, override) {
           rider.v.x = 5; rider.v.z = -1;
           if (rivalR) { rivalR.v.x = 5; rivalR.v.z = -1; rivalRun.x0 = rivalR.p.x; }
           run.startX = rider.p.x;          // distance counts from the pop-up
+          if (mode === 'free') {
+            run.rec = { dt: 4 / 120, t0: t, data: [] };
+            run.recTick = 0;
+            recordGhostSample();
+          }
           flash('TO YOUR FEET');
         }
       } else {
@@ -639,6 +732,7 @@ function frame(dt, override) {
         agg.splash = Math.max(agg.splash, ev.splash);
         if (ev.wiped) agg.wiped = ev.wiped;
         score(SUB, ev);
+        if (run.rec && (++run.recTick & 3) === 0) recordGhostSample();
         // The rival rides the same wave in the same fixed steps, and pauses with
         // you — a card on screen freezes both surfers, not just yours.
         if (mode === 'contest') stepRivalOne();
@@ -731,7 +825,7 @@ function frame(dt, override) {
       if (r.air) {
         r._airK = Math.min(1, r.airTime / 0.18);
         r._airExt = r.v.y < 0 ? Math.min(1, -r.v.y / 5.5) : 0;
-        rg.setAir(r._airK, r._airExt, r.spin);
+        rg.setAir(r._airK, r._airExt, r.spin, Math.min(1, (r.grabT || 0) * 4));
       } else if (r._airK > 0) {
         rg.setAir(r._airK, 1, 0);
       }
@@ -787,6 +881,9 @@ function frame(dt, override) {
     }
   }
 
+  updateGhost();
+  if (ghostRig.root.visible) poseOnWave(ghostRig, ghostR);
+
   SFX.frame({ foam: rider.foam, slide: agg.slide, speed: rider.speed,
               barrel: rider.barrel, down: run.over });
 
@@ -808,7 +905,7 @@ requestAnimationFrame(loop);
 
 // ---------------------------------------------------------------- debug handles
 window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat, rival, elementId,
-                         rivalR, rivalRun, rivalRig,
+                         rivalR, rivalRun, rivalRig, ghost, ghostRig,
                          breakId, screens, ui, world, fx, ocean, curl,
                          renderer, scene, camera, THREE });
 window.__surfRestart = restart;

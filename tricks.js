@@ -16,6 +16,7 @@ export const TRICKS = {
   snap:     { name: 'OFF THE LIP',  points: 240, hold: 1.4 },
   cutback:  { name: 'CUTBACK',      points: 180, hold: 1.4 },
   air:      { name: 'AIR',          points: 260, hold: 1.6 },
+  grab:     { name: 'GRABBED AIR',  points: 200, hold: 1.6 },
   airRev:   { name: 'AIR REVERSE',  points: 620, hold: 2.0 },
   tube:     { name: 'TUBE RIDE',    points: 0,   hold: 2.2 },  // scored by duration
 };
@@ -27,6 +28,7 @@ export function createTrickState() {
     highT: 0,              // time spent high on the face (lip setup)
     headHist: [],          // recent heading samples, for reversal detection
     wasAir: false,
+    grabFired: false,
     spinAtLaunch: 0,
     lastRelZ: 0,
   };
@@ -72,6 +74,15 @@ export function updateTricks(ts, r, ev, t, dt) {
   }
   ts.lastSpin = r.air ? r.spin : ts.lastSpin;
   ts.wasAir = r.air;
+
+  // --- grab: tuck held in the air. Fires mid-flight (stacking with the AIR
+  // scored on landing), once per flight — grabT resets on the water, and the
+  // flag re-arms with it.
+  if (r.air && !ts.grabFired && (r.grabT || 0) > 0.30) {
+    ts.grabFired = true;
+    fire('grab', { held: r.grabT });
+  }
+  if (!r.air) ts.grabFired = false;
 
   if (r.air) { ts.lowT = 0; ts.highT = 0; return out; }
 
