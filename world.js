@@ -110,7 +110,7 @@ function cloudTexture() {
     const y = S * (0.42 + r() * 0.34);
     const rad = S * (0.06 + r() * 0.16);
     const grad = g.createRadialGradient(x, y, 0, x, y, rad);
-    const a = 0.10 + r() * 0.16;
+    const a = 0.22 + r() * 0.26;
     grad.addColorStop(0, `rgba(255,255,255,${a})`);
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = grad;
@@ -127,24 +127,24 @@ function cloudTexture() {
 // break is how you know which break you are at without reading the HUD.
 const DRESSING = {
   home:  { land: { count: 9,  wMin: 26, wMax: 60, hMin: 14, hMax: 34, spread: 620, depth: 260, sink: 6 },
-           boats: 3, birds: 3, clouds: 16, landColor: 0x38443f, far: -430 },
+           boats: 3, birds: 3, clouds: 16, landColor: 0x38443f, far: -430, cloudColor: 0xdde4e6 },
   cove:  { land: { count: 14, wMin: 18, wMax: 44, hMin: 10, hMax: 26, spread: 520, depth: 200, sink: 4 },
-           boats: 2, birds: 4, clouds: 20, landColor: 0x3d4238, far: -330 },
+           boats: 2, birds: 4, clouds: 20, landColor: 0x3d4238, far: -330, cloudColor: 0xd8dfe2 },
   shelf: { land: { count: 6,  wMin: 34, wMax: 82, hMin: 26, hMax: 62, spread: 480, depth: 220, sink: 8 },
-           boats: 1, birds: 2, clouds: 12, landColor: 0x2f3538, far: -300 },
+           boats: 1, birds: 2, clouds: 12, landColor: 0x2f3538, far: -300, cloudColor: 0xc9d2d6 },
   outer: { land: { count: 4,  wMin: 40, wMax: 90, hMin: 12, hMax: 30, spread: 900, depth: 300, sink: 14 },
-           boats: 4, birds: 2, clouds: 24, landColor: 0x333c40, far: -760 },
+           boats: 4, birds: 2, clouds: 24, landColor: 0x333c40, far: -760, cloudColor: 0xdde4e6 },
 
   // Element worlds. Same machinery, different casts: no fishing boats on a lava
   // flow, no gulls in the void. The land silhhouettes do most of the storytelling.
   volcano: { land: { count: 7, wMin: 40, wMax: 110, hMin: 30, hMax: 85, spread: 700, depth: 300, sink: 6 },
-             boats: 0, birds: 0, clouds: 20, landColor: 0x180a06, far: -520 },
+             boats: 0, birds: 0, clouds: 20, landColor: 0x180a06, far: -520, cloudColor: 0x3a2018 },
   dunes:   { land: { count: 12, wMin: 40, wMax: 120, hMin: 8, hMax: 30, spread: 900, depth: 380, sink: 3 },
-             boats: 0, birds: 2, clouds: 8, landColor: 0x8a6b3c, far: -560 },
+             boats: 0, birds: 2, clouds: 8, landColor: 0x8a6b3c, far: -560, cloudColor: 0xd9c49a },
   peaks:   { land: { count: 9, wMin: 30, wMax: 80, hMin: 35, hMax: 95, spread: 800, depth: 320, sink: 4 },
-             boats: 0, birds: 1, clouds: 26, landColor: 0xcfdce6, far: -600 },
+             boats: 0, birds: 1, clouds: 26, landColor: 0xcfdce6, far: -600, cloudColor: 0xf2f6f8 },
   void:    { land: { count: 5, wMin: 25, wMax: 70, hMin: 20, hMax: 60, spread: 900, depth: 400, sink: -18 },
-             boats: 0, birds: 0, clouds: 30, landColor: 0x241a45, far: -700, stars: 1400 },
+             boats: 0, birds: 0, clouds: 30, landColor: 0x241a45, far: -700, stars: 1400, cloudColor: 0x4a3a78 },
 };
 
 export class World {
@@ -259,7 +259,8 @@ export class World {
 
     for (let i = 0; i < d.clouds; i++) {
       const mat = new THREE.SpriteMaterial({ map: this.cloudTex, transparent: true,
-        opacity: 0.30 + rand() * 0.35, depthWrite: false, fog: false });
+        color: d.cloudColor ?? 0xffffff,
+        opacity: 0.42 + rand() * 0.34, depthWrite: false, fog: false });
       const sp = new THREE.Sprite(mat);
       const sc = 120 + rand() * 340;
       sp.scale.set(sc, sc * (0.30 + rand() * 0.18), 1);

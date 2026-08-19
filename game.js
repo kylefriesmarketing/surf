@@ -37,13 +37,11 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x69787b, 105, 310);
 const camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, 0.1, 5000);
 
-createSky(scene);
+const sky = createSky(scene);
 createLights(scene);
 const ocean = new Ocean(scene);
-// ⚠️ THREE copies a Color passed to a material constructor rather than keeping the
-// reference, so the horizon backdrop did NOT retint with the palette — a lava sky
-// over an ocean-blue horizon band. Share the instance explicitly.
-ocean.far.material.color = PAL.deep;
+// (The backdrop plane is a ShaderMaterial bound to the shared PAL instances now,
+// so it follows every element retint by construction.)
 const curl = new Curl(scene);
 const fx = new SprayFX(scene);
 const world = new World(scene);
@@ -271,7 +269,7 @@ function applyElementView(elm) {
   for (const k of ['deep', 'shallow', 'glow', 'sky', 'horizon', 'sunCol', 'foam', 'zenith', 'low']) {
     if (PAL[k] && elm.pal[k] !== undefined) PAL[k].setHex(elm.pal[k]);
   }
-  scene.fog.color.setHex(elm.fog);
+  scene.fog.color.setHex(elm.pal.horizon);
   fx.setElement(elm);
   SFX.setElement(elm.id);
 }
@@ -789,6 +787,8 @@ function frame(dt, override) {
 
   // --- view
   world.update(dt, p.x, W.crestZ(p.x, t));
+  sky.position.set(camera.position.x, 0, camera.position.z);
+  sky.material.uniforms.uTime.value = t;
   ocean.update(t, p.x, camera);
   curl.update(t, p.x, camera);
   updateCamera(dt);

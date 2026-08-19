@@ -65,6 +65,34 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 order), a real wipeout animation, tuning the audio by ear, mobile testing,
 deployment to GitHub Pages.
 
+### M8.1 — the horizon, the sky, and the background (2026-08-18)
+The white band that ran across every horizon since M1 is dead, and the cause was
+geometry, not colour: the sky sphere was CENTRED AT THE ORIGIN and never moved,
+while the rider travels a kilometre down the line — the band was the
+below-horizon wedge of sky exposed past the edge of the (following) backdrop
+plane. Three fixes, belt and braces:
+1. the sky follows the camera every frame;
+2. below the horizon the sky shader returns the fog colour EXACTLY, so any
+   exposed wedge is indistinguishable from distant sea;
+3. one horizon colour for everything — scene fog, the ocean shader's distance
+   fade, the backdrop haze and the sky's own horizon all converge on the same
+   shared PAL.horizon instance (scene fog now uses pal.horizon, not a separate
+   per-element fog colour).
+
+The sky is ALIVE now: two cloud layers drifting at different rates (the old
+shader had no time uniform at all — frozen), cloud colours derived from the
+element palette instead of hardcoded greys (smoke over lava, violet murk in the
+void, for free), an exponential air-mass haze wedge, and a warm sun spill along
+the horizon at the sun's azimuth. The backdrop plane is a ShaderMaterial with
+slow outside swell lines marching shoreward and a sun glitter path — not a dead
+sheet — fading to the same shared horizon colour. World cloud sprites got a
+denser texture and per-world tints. Water's palette lifted ~20% because the old
+band had been doing accidental daylighting.
+
+⚠️ Bash mangling ate two GLSL template literals in a patch script and left
+ — the workspace's trap 16, walked into AGAIN despite the
+warning in this very file. Shader-bearing patches go through the Write tool.
+
 ### M8 — the grab, and the ghost (2026-08-18)
 Hold TUCK in the air and you are GRABBING — rail hand on the board, hips pulled
 tighter, scored as its own manoeuvre (a real hold, not a tap; once per flight;

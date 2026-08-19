@@ -26,8 +26,8 @@ export const ELEMENTS = {
     id: 'water', name: 'WATER', spray: 'SPRAY',
     physics: {},                                   // the baseline everything else bends
     tune: {},
-    pal: { deep: 0x062b3b, shallow: 0x287f84, glow: 0x4fb99e, sky: 0x81969e,
-           horizon: 0x69787b, sunCol: 0xffedca, foam: 0xf0f8fa, zenith: 0x172630, low: 0x69787b },
+    pal: { deep: 0x062b3b, shallow: 0x287f84, glow: 0x4fb99e, sky: 0x94aab4,
+           horizon: 0x8b9aa0, sunCol: 0xffedca, foam: 0xf0f8fa, zenith: 0x24394a, low: 0x8b9aa0 },
     fog: 0x9b9b91,
     tint: [0.90, 0.96, 1.00],
     sprayGravity: 9.81, sprayDrag: 1.35, sprayLife: 1.0,

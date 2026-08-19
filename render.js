@@ -189,9 +189,43 @@ export class Ocean {
     // It sits just BELOW the grid and shares the deep-water colour, with scene fog
     // on, so the diagonal edge of the sheared grid dissolves into it instead of
     // drawing a hard seam across the ocean.
-    const far = new THREE.Mesh(
-      new THREE.PlaneGeometry(6000, 6000),
-      new THREE.MeshBasicMaterial({ color: PAL.deep, fog: true, depthWrite: false }));
+    // The backdrop is no longer a dead sheet: faint swell lines march shoreward
+    // across it and it hazes to the SAME shared horizon colour the ocean shader
+    // and the sky use, so the three surfaces meet without a seam. The fade is
+    // manual because ShaderMaterial ignores scene fog.
+    const farMat = new THREE.ShaderMaterial({
+      depthWrite: false,
+      uniforms: {
+        uDeep: { value: PAL.deep }, uHor: { value: PAL.horizon },
+        uSunCol: { value: PAL.sunCol }, uSun: { value: SUN },
+        uCam: { value: new THREE.Vector3() }, uTime: { value: 0 },
+      },
+      vertexShader: `varying vec3 vW;
+        void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz;
+          gl_Position = projectionMatrix * viewMatrix * w; }`,
+      fragmentShader: `
+        uniform vec3 uDeep, uHor, uSunCol, uSun, uCam;
+        uniform float uTime;
+        varying vec3 vW;
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+          return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }
+        void main(){
+          vec3 col = uDeep;
+          // Outside swell lines: long, slow, marching toward the beach.
+          float lines = sin(vW.z * .045 - uTime * .55 + vnoise(vW.xz * .012) * 3.0);
+          float amp = vnoise(vW.xz * .006 + vec2(0.0, uTime * .01));
+          col *= 1.0 + lines * (.05 + amp * .06);
+          // Sun glitter path on the far water, toward the sun azimuth.
+          vec2 toP = normalize(vW.xz - uCam.xz);
+          float path = pow(max(0.0, dot(toP, normalize(uSun.xz))), 24.0);
+          col += uSunCol * path * .05;
+          float d = length(vW - uCam);
+          col = mix(col, uHor, smoothstep(85.0, 205.0, d));
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    const far = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), farMat);
     far.rotation.x = -Math.PI / 2;
     far.position.y = -0.05;
     far.renderOrder = -5;
@@ -215,6 +249,8 @@ export class Ocean {
       }
     }
     this.rebuildNormals();
+    this.far.material.uniforms.uCam.value.copy(cam.position);
+    this.far.material.uniforms.uTime.value = t;
     this.far.position.x = riderX;
     this.far.position.z = W.crestZ(riderX, t);
     this.mat.uniforms.uCam.value.copy(cam.position);
@@ -369,11 +405,13 @@ export function createSky(scene) {
       uZen: { value: PAL.zenith }, uLow: { value: PAL.low },
       uHor: { value: PAL.horizon }, uSun: { value: SUN },
       uSunCol: { value: PAL.sunCol },
+      uTime: { value: 0 },
     },
     vertexShader: `varying vec3 vD; void main(){ vD = normalize(position);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: `
       uniform vec3 uZen, uLow, uHor, uSun, uSunCol;
+      uniform float uTime;
       varying vec3 vD;
       float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7))) * 43758.5453); }
       float noise(vec2 p){
@@ -386,26 +424,52 @@ export function createSky(scene) {
       }
       void main(){
         vec3 D=normalize(vD);
-        float h=clamp(D.y, -0.2, 1.0);
-        vec3 col=mix(uHor,uZen,smoothstep(0.02,0.68,h));
-        col=mix(uLow,col,smoothstep(-0.08,0.26,h));
-        float az=atan(D.z,D.x);
-        vec2 cp=vec2(az*1.45,D.y*5.2);
-        float broad=fbm(cp*0.72+vec2(1.4,-.6));
-        float detail=fbm(cp*2.05+vec2(-3.2,4.1));
-        float cloud=smoothstep(.50,.78,broad*.72+detail*.28);
-        cloud*=smoothstep(-.03,.16,h)*(1.0-smoothstep(.72,.98,h));
-        vec3 cloudDark=vec3(.19,.235,.25), cloudLight=vec3(.54,.57,.56);
-        float silver=pow(max(0.0,dot(D,normalize(uSun))),9.0);
-        col=mix(col,mix(cloudDark,cloudLight,.25+silver*.75),cloud*.78);
-        float haze=exp(-max(0.0,h)*12.0);
-        col=mix(col,uHor,haze*.26);
-        float s=max(0.0,dot(D,normalize(uSun)));
-        col+=uSunCol*pow(s,2200.0)*1.35;
-        col+=uSunCol*pow(s,85.0)*.18;
-        col+=uSunCol*pow(s,9.0)*.035;
-        float grain=(hash(gl_FragCoord.xy)-.5)/255.0;
-        gl_FragColor=vec4(col+grain,1.0);
+        float h=D.y;
+
+        // ⚠️ Below the horizon the sky IS the fog colour, exactly. The backdrop
+        // plane is finite and the camera travels a kilometre down the line, so
+        // slivers of below-horizon sky WILL peek past its edge — and if they are
+        // any other colour they draw a bright band across the sea (they did, in
+        // every screenshot for six milestones). Made indistinguishable instead
+        // of chasing geometry coverage.
+        if (h <= 0.0) { gl_FragColor = vec4(uHor, 1.0); return; }
+
+        // Three-stop gradient with an exponential haze wedge at the horizon —
+        // air mass, not a linear ramp.
+        vec3 col = mix(uLow, uZen, smoothstep(0.02, 0.62, h));
+        col = mix(uHor, col, 1.0 - exp(-h * 9.0));
+
+        float az = atan(D.z, D.x);
+        vec2 cp = vec2(az * 1.45, D.y * 5.2);
+
+        // Two cloud layers, drifting at different rates so the sky is ALIVE —
+        // the old one was frozen (no time uniform at all). Colours derive from
+        // the palette, not hardcoded greys, so lava gets smoke and the void gets
+        // violet murk without any per-element shader work.
+        vec2 drift1 = vec2(uTime * .0045, uTime * .0011);
+        vec2 drift2 = vec2(-uTime * .0028, uTime * .0018);
+        float broad  = fbm(cp * .72 + drift1 + vec2(1.4, -.6));
+        float detail = fbm(cp * 2.05 + drift2 + vec2(-3.2, 4.1));
+        float cloud = smoothstep(.50, .78, broad * .72 + detail * .28);
+        cloud *= smoothstep(-.03, .14, h) * (1.0 - smoothstep(.70, .98, h));
+
+        float silver = pow(max(0.0, dot(D, normalize(uSun))), 9.0);
+        vec3 cloudDark  = mix(uZen, uHor, .30) * .82;
+        vec3 cloudLight = mix(uHor, uSunCol, .28) * 1.12;
+        col = mix(col, mix(cloudDark, cloudLight, .22 + silver * .78), cloud * .74);
+
+        // The sun: disc, corona, and a warm spill along the horizon band around
+        // its azimuth — the thing that makes a low sun feel LOW.
+        float s = max(0.0, dot(D, normalize(uSun)));
+        col += uSunCol * pow(s, 2200.0) * 1.35;
+        col += uSunCol * pow(s, 85.0) * .22;
+        col += uSunCol * pow(s, 9.0) * .05;
+        vec2 sunH = normalize(uSun.xz); vec2 dH = normalize(D.xz);
+        float azClose = pow(max(0.0, dot(sunH, dH)), 6.0);
+        col += uSunCol * azClose * exp(-h * 16.0) * .16;
+
+        float grain = (hash(gl_FragCoord.xy) - .5) / 255.0;
+        gl_FragColor = vec4(col + grain, 1.0);
       }`,
   });
   const sky = new THREE.Mesh(geo, mat);
