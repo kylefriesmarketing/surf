@@ -89,8 +89,8 @@ sheet — fading to the same shared horizon colour. World cloud sprites got a
 denser texture and per-world tints. Water's palette lifted ~20% because the old
 band had been doing accidental daylighting.
 
-⚠️ Bash mangling ate two GLSL template literals in a patch script and left
- — the workspace's trap 16, walked into AGAIN despite the
+⚠️ Bash mangling ate two GLSL template literals in a patch script and left an
+empty vertexShader property in the tree — the workspace's trap 16, walked into AGAIN despite the
 warning in this very file. Shader-bearing patches go through the Write tool.
 
 ### M8 — the grab, and the ghost (2026-08-18)
