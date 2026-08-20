@@ -61,10 +61,9 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 | Audio (WebAudio synth, no files) | done, **not yet heard by a human** |
 | Touch controls | written, **untested on a real device** |
 
-**Not done / next:** tuning the audio by ear, mobile testing, and authored jump
-features on the three descents (see M9 — the rollers cannot collapse λ far enough
-to launch). Wave selection shipped in M6, the wipeout tumble in M5, and the game
-is live on GitHub Pages.
+**Not done / next:** tuning the audio by ear and mobile testing. Wave selection
+shipped in M6, the wipeout tumble in M5, authored jumps on the descents in M9.2,
+and the game is live on GitHub Pages.
 
 ### M9 — the geography is honest now: three of the five media are LANDFORMS (2026-08-19)
 
@@ -126,13 +125,11 @@ because the resulting ridge runs mostly along +z and the rider falls off the end
 of it immediately. The comment sits on the constant; do not re-tilt it without
 re-measuring run length.
 
-**⚠️ Descents produce no airs, and that is not a bug to chase blindly.** Measured
-minimum λ on the rollers is ~5 against a `launchLambda` of 0.9 — the face never
-falls away faster than the rider can follow. Getting airs would need λ ≤ 0.9,
-i.e. `hxx·ẋ² < −8.3`, which at realistic speeds means megaripples about a 7 m
-wavelength and 0.7 m amplitude: a face that is visibly corrugated. Authored
-individual lips would be the right answer, not louder ripples. The airs on water
-are unaffected.
+**⚠️ The megaripples cannot launch anybody, and that is settled — do not try to
+make them.** Measured minimum λ over them is ~5 against a `launchLambda` of 0.9;
+the amplitude that would fix it corrugates the whole face into chatter. Authored
+lips were the right answer and they shipped in **M9.2** — read that section
+before touching anything in the `park` block.
 
 **⚠️ The view grid had to be re-laid, and the old layout drew a cliff through
 the middle of every descent.** `Ocean` crowds rows on the wave face and reaches
@@ -150,6 +147,74 @@ descents assert that the fall line is *shorter and faster* than the traverse. A
 new `geography: the landforms stand still` group pins the actual invariant —
 zero crest travel and zero height drift over 5 s for the three descents, real
 travel for the two waves. 138 tests green.
+
+### M9.2 — authored jumps on the descents (2026-08-19)
+
+M9 closed saying the descents could not launch anybody and that real jumps would
+need authored lips rather than louder megaripples. They do, and here they are: a
+small terrain park cut into each slipface — 3 lips on sand, 4 on snow, 2 on lava.
+Measured live on a committed fall line: **sand 2 airs, snow 2, lava 1**, longest
+about 1.25 s. Hold a traverse instead and you get none.
+
+**That is the design, not a shortfall.** The lips run across the slope, so
+pointing down the fall line crosses them fast enough to fly while a traverse
+rides along them and stays planted. Speed and airs versus distance and time — the
+trade the descents already had, now with something at the top of it.
+
+**Four gates stand between a lip and an air, and I hit all four in order.** Each
+one is worth knowing, because each looked like the same symptom: no airs.
+
+1. **λ was never the problem.** The first lips collapsed λ to −12 on sand and −22
+   on snow, miles past the 0.9 threshold. Nobody launched.
+2. **`surfaceRate > 0.5` refused every one of those frames** — 28 to 73 per run.
+   The gate is CORRECT: it means the surface is throwing you upward, and a
+   surface that merely curves out from under you drops you rather than throwing
+   you. The lip shape was wrong. A real kicker is a **steep ramp you climb**, so
+   the sharp side is the approach and the gentle side is the landing. I had the
+   asymmetry backwards.
+3. **`launchMin` (3.4) after `launchEfficiency` (0.70)** needs 4.86 m/s of climb.
+   Pop is `parkKick × |ż|`, so at a committed |ż| of ~7 the take-off has to turn
+   you up by a slope near 1.0. That is why `parkKick` looks alarmingly steep.
+   The descents also lower `launchMin` to 2.2, which is safe here for a reason
+   the tests now guard: with the lips off, a descent is near-inert.
+4. **Then the lips became a fence.** At 1.5 m tall the take-off is a ~65° wall,
+   and on the shallowest face with the slowest medium a traversing rider could
+   not climb it — lava's traverse fell from 79 m to 18 m, pinned for 116 s.
+
+**Three fixes came out of that last one, and each is a real design rule:**
+
+- **The ramp width is DERIVED, never authored.** What must be true is that the
+  ramp out-slopes the face it is cut into, and the face's gradient varies with
+  the element, the break and the altitude. Fixing widths pins the wrong quantity:
+  the identical lip launched on snow and did nothing on sand purely because
+  sand's face is shallower.
+- **Keep the lips SMALL — `parkAmp` is barely half a metre.** Height buys nothing:
+  pop is independent of amp, and the curvature that collapses λ goes as 1/amp, so
+  a smaller lip is both easier to get over AND easier to fly. At 0.55 m the
+  traverse measures within a metre of a park-free face.
+- **Jumps have LANES, and none of them sit at the drop-in.** A lip spanning the
+  hill is a fence, so they are cut into discrete jumps with clear ground between,
+  staggered so no line down the hill is all jumps or all lanes. And the top lip
+  moved from 0.62 altitude down from 0.76, because a take-off's uphill side is
+  concave — a genuine pocket in the height field — and at the top of the face you
+  have not bought any speed yet to climb out of it.
+
+**One more sim fix fell out of this: landing impact is now the closing speed with
+the SURFACE, not raw |v.y|.** On a wave those are nearly identical, which is why
+raw |v.y| held up for eight milestones — you come down in a roughly flat trough.
+On a slipface falling at 40° it is badly wrong: a rider dropping onto a descent is
+travelling mostly ALONG the ground and was charged for all of it, measured at 15.5
+against a threshold of 15.0. A wipeout for landing well, on the steepest part of
+the run. `v·n` reduces to `|v.y|` exactly when the surface is flat, so water is
+unchanged.
+
+**Tests: 185 green**, with a new `descents: the authored jumps` group. Its
+important assertion is the CONTROL — with the lips switched off, the same line
+must launch strictly fewer times. That is what licenses the lower `launchMin`.
+⚠️ It is comparative, not "exactly zero": snow on the outer bank is a 40 m face
+whose megaripples scale with A, and bare ground there does throw one air per
+14,000-step run. One is not chatter — the rattle that floor exists to prevent
+measured 169 a minute — but it is real, so the claim had to be honest.
 
 ### M9.1 — the arms were folded across his chest (2026-08-19)
 

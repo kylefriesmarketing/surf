@@ -127,8 +127,18 @@ export function stepRider(r, t, input, dt) {
     // flight, the lip is spray, and the board carries on.
     if (p.y <= hLand && (v.y <= 0.5 || r.airTime > TUNE.punchThrough)) {
       p.y = hLand;
-      const impact = Math.abs(v.y);
       W.normal(p.x, p.z, t, _n);
+      // ⚠️ Impact is the closing speed with the SURFACE, not raw |v.y|.
+      //
+      // On a wave those are nearly the same thing, because you come down in a
+      // roughly flat trough — which is why raw |v.y| held up for eight milestones.
+      // On a slipface falling at ~40° it is badly wrong: a rider dropping onto a
+      // descent is travelling mostly ALONG the ground, and the raw measure charged
+      // them for all of it. Measured on sand off the top kicker, 15.5 against a
+      // threshold of 15.0 — a wipeout for landing well, on the steepest part of
+      // the run, which is precisely where a landing should be softest.
+      // v·n reduces to |v.y| exactly when n = (0,1,0), so flat water is unchanged.
+      const impact = Math.abs(v.x * _n.x + v.y * _n.y + v.z * _n.z);
       // Landing badly means landing across your own direction of travel, or flat
       // out of a big one.
       const vh = Math.hypot(v.x, v.z);

@@ -61,6 +61,62 @@ export const WAVE = {
                      // exactly like a snowboard: 6 s / 19 m pointing down it,
                      // 33 s / 96 m holding a line across it.
   duneRun: 3.0,      // slipface length in units of W
+
+  // --- authored jumps (see parkLip). The megaripples in `roll` CANNOT launch
+  // anybody: measured, minimum λ over them is ~5 against a launch threshold of
+  // 0.9, and the amplitude needed to fix that everywhere would corrugate the
+  // entire face into chatter. So the pop is authored instead — a few discrete
+  // lips at fixed altitudes.
+  park: 0,           // 1 = cut jump lips into the slipface
+  parkCount: 3,      // how many lips down the face
+  // ⚠️ THE LIP IS AUTHORED IN METRES, not in units of A or W, and it has to stay
+  // that way. Every threshold it has to clear is absolute — λ against
+  // launchLambda, and the take-off speed against launchMin. Scale the lip with
+  // the break and a big wave silently stops launching while a small one turns
+  // into a trampoline.
+  // ⚠️ AND THE ASYMMETRY POINTS THE WAY IT DOES FOR A REASON. The first build had
+  // it backwards — a gentle approach and a sharp back edge — reasoning that the
+  // sharp fall-away is what collapses λ. It does: λ measured −12 on sand and −22
+  // on snow. NOBODY LAUNCHED, because board.js also asks `surfaceRate > 0.5`, and
+  // that gate is correct: a surface that merely curves out from under you drops
+  // you, it does not throw you. Every one of those 28–73 negative-λ frames was
+  // refused. A real kicker is a STEEP RAMP YOU CLIMB and then a fast fall-away, so
+  // the ramp is the sharp side and the landing is the gentle one.
+  parkAmp: 0.55,     // lip height, metres — sets the SIZE of the feature only
+  // ⚠️ parkKick is the real design knob, and the take-off width is DERIVED from
+  // it (see parkLip). It is the slope the take-off turns you UP by, over and
+  // above the face's own gradient — so your vertical speed off the lip is very
+  // nearly `parkKick × |ż|`, and the lip's height barely matters. Authoring a
+  // width instead pins the wrong quantity: a fixed width launched on snow and did
+  // nothing on sand, purely because sand's face is shallower.
+  // ⚠️ It has to be ABOUT 1, which looks alarmingly steep until you do the sum.
+  // board.js only calls it a launch above `launchMin` (3.4) after
+  // `launchEfficiency` (0.70), so the take-off must produce 4.86 m/s of climb;
+  // at a committed |ż| of ~7 that needs a slope near 0.7 just to register, and
+  // below ~0.6 nothing ever leaves the ground however deep λ goes.
+  parkKick: 1.05,    // upward slope of the take-off, over and above the face's
+  parkLand: 2.60,    // lower half-width, metres — gentle, blends into the landing
+  parkWobble: 2.4,   // how far the lip line wanders in altitude across x, metres
+  // ⚠️ Lanes. A lip must NOT span the hill, or it is a fence. The take-off is a
+  // ~65° face by construction, and on a shallow slipface with a slow medium a
+  // traversing rider simply cannot climb it: measured on lava at the smallest
+  // break, the rider sat pinned above the top lip for 116 seconds and the
+  // traverse fell from 79 m to 18 m. Cutting the lips into discrete jumps with
+  // clear ground between them fixes it the way a real terrain park does — you
+  // can always steer around one, and a rider who does stall on a take-off slides
+  // along it into the next gap instead of parking there forever.
+  parkSpan: 34,      // metres between jump centres along the slope
+  parkWide: 13,      // half-width of one jump, metres
+  parkEdge: 3.0,     // how quickly a jump fades out into the clear lane, metres
+  parkStagger: 13,   // x-offset per lip, so the lips never line up into a fence
+  // ⚠️ NO FEATURE NEAR THE DROP-IN. The uphill side of a take-off is concave, so
+  // it makes a genuine pocket in the height field — and at the top of the face
+  // you have not bought any speed yet, so a slow medium settles into that pocket
+  // and stays there. Measured with the top lip at 0.76: pinned at altitude 0.85
+  // for the entire 116-second run. A real park puts its first hit well below the
+  // drop-in for the same reason.
+  parkTop: 0.62,     // altitude of the highest lip (1 = crest, 0 = runout)
+  parkBot: 0.24,     // altitude of the lowest
 };
 
 // A session is a SET: five waves, each bigger and faster-peeling than the last.
@@ -116,6 +172,85 @@ function sech2(x) {
   const e = EXP(a);
   const s = 2 / (e + 1 / e);
   return s * s;
+}
+
+/**
+ * Where the authored lips sit, as altitude fractions (1 = crest lip, 0 = runout).
+ * Spread between 0.76 and 0.26 so the top one is clear of the drop-in and the
+ * bottom one is clear of the soft runout you land in when you get it wrong.
+ */
+export function parkAltitudes() {
+  if (!WAVE.dune || !WAVE.park) return [];
+  const n = WAVE.parkCount, out = [];
+  for (let i = 0; i < n; i++) out.push(WAVE.parkTop - i * ((WAVE.parkTop - WAVE.parkBot) / (n > 1 ? n - 1 : 1)));
+  return out;
+}
+
+/**
+ * Authored jumps: transverse LIPS cut across the slipface, in metres of extra
+ * height. Each is a gaussian built like a terrain-park kicker — a SHORT STEEP
+ * take-off ramp on the uphill side, which you climb, and a gentler lower side
+ * that blends back into the face as the landing.
+ *
+ * The ramp has to out-slope the face itself or it is not a jump, so its width is
+ * solved for rather than authored (see parkKick below). Climbing it is close to
+ * free, because over the ramp's length the face beneath has already dropped
+ * nearly as far — which is exactly why a kicker cut into a steep slope works.
+ *
+ * ⚠️ KEEP THE LIPS SMALL — parkAmp is barely half a metre, and that is not
+ * timidity. The take-off slope is `faceSlope + parkKick` ≈ 2.0, a 64° face, so a
+ * TALL lip is a wall: at 1.5 m it stopped a traversing rider dead and the
+ * traverse collapsed from 136 m to 18 m, taking the descents' whole risk trade
+ * with it. Height buys nothing anyway — pop is `parkKick × |ż|`, independent of
+ * amp, and the curvature that collapses λ goes as 1/amp, so a smaller lip is
+ * both easier to get over AND easier to fly. At 0.55 m the traverse measures
+ * within a metre of a park-free face while the fall line still takes every lip.
+ *
+ * ⚠️ They run ACROSS the slope on purpose, and that is the whole design. Point
+ * down the fall line and you cross them fast enough to fly; hold a traverse and
+ * you ride ALONG them and stay planted. Speed and airs versus distance and time —
+ * the same trade the descents already had, now with something at stake at the top
+ * of it. A rider who never commits to the fall line will never see a jump, and
+ * that is correct, not a bug.
+ *
+ * Pure: x and u only, no time, no rng. The view draws the same function it is
+ * ridden on, so the lips appear in the terrain for free.
+ */
+function parkLip(x, u) {
+  if (!WAVE.park) return 0;
+  const n = WAVE.parkCount;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const alt = WAVE.parkTop - i * ((WAVE.parkTop - WAVE.parkBot) / (n > 1 ? n - 1 : 1));
+    // The lip line wanders in altitude across the slope, so it reads as a dune
+    // ripple rather than a ruled line — and the same jump arrives at a different
+    // moment depending on where you dropped in. Gentle on purpose: the curvature
+    // this adds in x is ~0.003, three orders below the lip's own, so it cannot
+    // launch you sideways.
+    const wob = WAVE.parkWobble * Math.sin(x * 0.037 + i * 2.4);
+    const dz = (u - (alt - 1) * WAVE.duneRun) * WAVE.W - wob;  // metres above the lip
+    // The face's own gradient here, from d/dz of A·smooth(1 + u/run). It varies
+    // with the element (A), the break (W) AND where on the face the lip sits, so
+    // the take-off has to be sized against it rather than against a constant.
+    const faceSlope = 6 * alt * (1 - alt) * WAVE.A / (WAVE.duneRun * WAVE.W);
+    // A gaussian's steepest gradient is amp/(s·√e). Solving that for the width
+    // that gives `faceSlope + parkKick` leaves a net upslope of exactly parkKick
+    // where the take-off is steepest — which is the whole point of the feature.
+    const ramp = WAVE.parkAmp / ((faceSlope + WAVE.parkKick) * 1.6487);
+    const s = dz > 0 ? ramp : WAVE.parkLand;
+    const q = dz / s;
+    if (q > 6 || q < -6) continue;
+    // Cut this lip into discrete jumps with clear lanes between them. The stagger
+    // keeps consecutive lips out of phase, so no single line down the hill is
+    // either all jumps or all lanes.
+    const cyc = WAVE.parkSpan;
+    const ph = x + i * WAVE.parkStagger;
+    const d = ((ph % cyc) + cyc) % cyc - cyc * 0.5;
+    const lane = smooth(clamp01((WAVE.parkWide - (d < 0 ? -d : d)) / WAVE.parkEdge));
+    if (lane <= 0) continue;
+    sum += lane * WAVE.parkAmp * EXP(-0.5 * q * q);
+  }
+  return sum;
 }
 
 function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -237,7 +372,15 @@ export function height(x, z, t) {
     const roll = Math.sin(x * 0.021 + 1.7) * 0.075
                + Math.sin(x * 0.055) * 0.040
                + Math.sin(x * 0.55 + 0.6) * 0.042 * patch;
-    return WAVE.A * hh * (1 + roll) + chop(x, z, t) * 0.6;
+    // The authored lips ride ON TOP of the landform, in metres, unscaled by A —
+    // and only on the slipface, so the flat runout stays a place you can bog down
+    // in rather than a launch pad.
+    // ⚠️ This mask must be SMOOTH. A hard `u < 0 && u > -run` test leaves the
+    // gaussian tails cut off mid-slope — measured a 10 cm step at the crest — and
+    // a step in the height field is a cliff in the normals and a spike in the
+    // curvature the launch test reads.
+    const face = smooth(clamp01(-u / 0.30)) * smooth(clamp01((u + run) / 0.30));
+    return WAVE.A * hh * (1 + roll) + face * parkLip(x, u) + chop(x, z, t) * 0.6;
   }
 
   // Skewed soliton: steep face shoreward of the crest, long gentle back seaward.

@@ -11,6 +11,17 @@
 //                 surface you slide on; high grip means one you can set a line in
 //   foamGrace     how long the broken stuff takes to kill you. Lava is short
 //   gravityScale  the whole force balance, including airs
+//   launchMin     the floor a take-off must clear to count as an air
+//
+// ⚠️ The three DESCENTS lower `launchMin` to 2.2 from the water default of 3.4, and
+// that is safe for a reason worth keeping: on a wave the floor exists to stop the
+// board micro-hopping off every ripple (measured at up to 169 rattles a minute on
+// the outer bank). A dune has no such source — with the jump lips switched off, a
+// descent produces ZERO airs at either floor, across every element and heading
+// probed. So on a landform the only thing that can launch you is an authored lip,
+// and the floor is free to come down far enough that the top lip, crossed slowly,
+// still counts. Without it only the fast lower lips fire and two thirds of the
+// park is invisible.
 //
 // The palette is applied by writing the EXISTING shader uniforms (uDeep, uShallow,
 // uGlow, uSky, uHorizon, uSunCol, uZenith, uLow). No shader is edited to add an
@@ -41,10 +52,14 @@ export const ELEMENTS = {
     // and thick: committed heavy turns, a low top speed, and a chilled crust at the
     // bottom of the flank that will not let go once it has you.
     dune: true,
+    // Only two lips: hardened lobes on a flank, not a built park. Pop is
+    // `parkKick × |ż|` and lava is the slowest medium, so it flies the least of
+    // the three on the same take-off — which is right for molten rock.
     physics: { dune: 1, duneTilt: 0, duneRun: 2.6, chopAmp: 0.05,
-               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0,
+               park: 1, parkCount: 2, parkAmp: 0.55, parkKick: 1.05, parkLand: 2.20 },
     tune: { dragPlane: 0.050, dragSlow: 0.070, gripMax: 19.0, slipDrag: 0.80,
-            foamGrace: 0.60, maxSpeed: 19 },
+            foamGrace: 0.60, maxSpeed: 19, launchMin: 2.2 },
     ampScale: 2.6,
     pal: { deep: 0x1a0704, shallow: 0xc4400e, glow: 0xff9433, sky: 0x35180f,
            horizon: 0x6b2e15, sunCol: 0xffb066, foam: 0xffb35c, zenith: 0x0d0503, low: 0x4a1e0c },
@@ -63,10 +78,12 @@ export const ELEMENTS = {
     // stay high and the run lasts. The surface is loose, so the rails break away
     // early and everything is a drift.
     dune: true,
+    // Three lips down the face, middling pop: sand is the teaching descent.
     physics: { dune: 1, duneTilt: 0, duneRun: 3.0, chopAmp: 0.05,
-               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0,
+               park: 1, parkCount: 3, parkAmp: 0.55, parkKick: 1.05, parkLand: 2.60 },
     tune: { dragPlane: 0.030, gripMax: 10.5, slipDrag: 0.34, foamGrace: 1.45,
-            maxSpeed: 21 },
+            maxSpeed: 21, launchMin: 2.2 },
     ampScale: 3.2,     // dunes are LANDFORMS — tens of metres, not chest high
     pal: { deep: 0x6b4a24, shallow: 0xd9ad63, glow: 0xf2d191, sky: 0xc2ab80,
            horizon: 0xd8c39a, sunCol: 0xfff0cc, foam: 0xeedbb2, zenith: 0x8f9c9e, low: 0xd8c39a },
@@ -82,10 +99,13 @@ export const ELEMENTS = {
     // near-frictionless, edges that bite hard, and a big vertical to spend. This is
     // the medium where a clean line is worth the most.
     dune: true,
+    // The longest face gets the most features and the biggest kickers — this is
+    // the terrain park of the five media, and the one worth learning to fly.
     physics: { dune: 1, duneTilt: 0, duneRun: 4.2, chopAmp: 0.07,
-               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0,
+               park: 1, parkCount: 4, parkAmp: 0.65, parkKick: 1.05, parkLand: 2.90 },
     tune: { dragPlane: 0.018, dragSlow: 0.030, gripMax: 21.0, slipDrag: 0.44,
-            foamGrace: 0.85, maxSpeed: 28 },
+            foamGrace: 0.85, maxSpeed: 28, launchMin: 2.2 },
     ampScale: 4.0,
     pal: { deep: 0x46617e, shallow: 0xd6e6f4, glow: 0xc4e4ff, sky: 0x9fbcd4,
            horizon: 0xdfe8ee, sunCol: 0xfff8e8, foam: 0xffffff, zenith: 0x2c465e, low: 0xdfe8ee },

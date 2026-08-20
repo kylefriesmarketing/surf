@@ -778,6 +778,73 @@ group('geography: the landforms stand still');
   W.applyWave(before);
 }
 
+group('descents: the authored jumps, and the trade they are built on');
+{
+  // The three descents carry a small terrain park — a few lips cut across the
+  // slipface. Everything here is a guard on a value that was measured the hard
+  // way; see the ⚠️ block on the park constants in wave.js before touching any
+  // of it, because three plausible-looking settings each broke a different thing.
+  const before = W.waveDefaults();
+  const DUNES = E.LIST.filter((e) => e.dune);
+
+  for (const el of DUNES) {
+    for (const [bid, wi] of [['home', 1], ['home', 4], ['outer', 2]]) {
+      const label = `${el.id}@${bid}${wi}`;
+
+      // 1. A committed fall line finds the park.
+      E.applyElement(el, B.waveParams(bid, wi));
+      const steep = ride(14000, dunePolicy(-0.8));
+      ok(`${label}: the fall line launches`, steep.log.launches >= 1,
+         `${steep.log.launches} airs in ${steep.log.dist.toFixed(0)}m`);
+
+      // 2. THE CONTROL, and it is the important one: the airs must come from the
+      // LIPS, not from the ground being bumpy. That is what licenses the
+      // descents' lower `launchMin` (see elements.js) — a floor that low would be
+      // reckless on a surface that launches you by itself.
+      // ⚠️ Not asserted as exactly zero. Snow on the outer bank is a 40 m face,
+      // and its megaripples scale with A, so bare ground there does throw one
+      // air in a fourteen-thousand-step run. One is not chatter — the rattle this
+      // floor exists to prevent measured 169 a minute — but it is real, so the
+      // claim is the comparative one.
+      E.applyElement(el, B.waveParams(bid, wi));
+      W.applyWave({ ...W.WAVE, park: 0 });
+      const bare = ride(14000, dunePolicy(-0.8));
+      ok(`${label}: bare ground is near-inert`, bare.log.launches <= 1,
+         `${bare.log.launches} airs off a park-free face`);
+      ok(`${label}: the park is what launches you`, steep.log.launches > bare.log.launches,
+         `${steep.log.launches} airs with the park vs ${bare.log.launches} without`);
+
+      // 3. The trade: a traverse rides ALONG the lips rather than over them, so
+      // it stays planted — and, more importantly, the park must not FENCE it in.
+      // A tall lip is a wall a slow medium cannot climb; at 1.5 m this collapsed
+      // lava's traverse from 79 m to 18 m and it sat pinned for 116 s.
+      E.applyElement(el, B.waveParams(bid, wi));
+      const across = ride(14000, dunePolicy(-0.18));
+      E.applyElement(el, B.waveParams(bid, wi));
+      W.applyWave({ ...W.WAVE, park: 0 });
+      const acrossBare = ride(14000, dunePolicy(-0.18));
+      ok(`${label}: the park does not fence off the traverse`,
+         across.log.dist > acrossBare.log.dist * 0.80,
+         `${across.log.dist.toFixed(0)}m with the park vs ${acrossBare.log.dist.toFixed(0)}m without`);
+      ok(`${label}: and a traverse stays on the ground`, across.log.launches <= 1,
+         `${across.log.launches} airs while traversing`);
+    }
+  }
+
+  // The lips sit clear of both ends of the face: nothing at the drop-in (where a
+  // slow rider settles into the take-off's concave back and never gets out) and
+  // nothing down in the runout.
+  E.applyElement(E.byId('sand'), B.waveParams('home', 3));
+  const alts = W.parkAltitudes();
+  ok('every lip sits inside the rideable band', alts.length === 3
+     && alts.every((a) => a <= 0.62 + 1e-9 && a >= 0.24 - 1e-9),
+     alts.map((a) => a.toFixed(2)).join(' '));
+  ok('and a wave has no park at all', (E.applyElement(E.byId('water'), {}),
+     W.parkAltitudes().length === 0));
+
+  W.applyWave(before);
+}
+
 
 group('lineup: the bomb is still a wave');
 {
