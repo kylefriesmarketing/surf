@@ -304,6 +304,16 @@ function refreshDerived(r, t) {
   r.speed = Math.hypot(v.x, v.z);
   r.foam = W.foamAt(p.x, p.z, t);
   r.barrel = W.barrelAt(p.x, p.y, p.z, t);
+  if (W.WAVE.dune) {
+    // The dune has no break to lag behind. Your ALTITUDE on the slipface is the
+    // resource: 1 at the lip, 0 in the runout, and every metre of speed you take
+    // is altitude you will not get back. The pocket term rewards the fast middle
+    // third of the face, so the scoring still has a sweet spot to hunt.
+    r.alt = W.duneAlt(p.x, p.z, t);
+    r.lag = (1 - r.alt) * 46 - 30;      // keeps the HUD gauge meaningful
+    r.pocket = Math.exp(-(((r.alt - 0.52) / 0.30) ** 2));
+    return;
+  }
   const b = W.breakLag(p.x, t);
   // The pocket: the steep few metres just ahead of the foam. Everything good
   // happens here, which is why the score rewards sitting in it.
@@ -317,6 +327,13 @@ function refreshDerived(r, t) {
  * out to sea while the wave leaves without him.
  */
 export function takeoffSpot(t) {
+  // On a dune you drop in over the lip at the TOP of the slipface — there is no
+  // pocket to sit in and nothing chasing you, so altitude is the only thing you
+  // start with and everything you do spends it.
+  if (W.WAVE.dune) {
+    const x = 0;
+    return { x, z: W.crestZ(x, t) - W.WAVE.W * 0.14 };
+  }
   const x = W.breakX(t) + 11;
   return { x, z: W.crestZ(x, t) - 3.5 };
 }

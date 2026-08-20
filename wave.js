@@ -49,6 +49,18 @@ export const WAVE = {
   setGap: 78,        // how far out to sea that next line sits, metres
 
   rideLength: 900,   // the point runs out here — the wave closes out
+
+  // --- dune mode (see crestZ/height). A standing landform instead of a wave.
+  dune: 0,           // 1 = static slipface you descend, 0 = travelling swell
+  duneTilt: 0,       // ridge-line slope. ⚠️ KEEP THIS 0. A tilted ridge sounds
+                     // like it would give you a traverse for free, and it does —
+                     // but along the RIDGE, which runs mostly in +z, while the
+                     // game measures distance in x. Measured at tilt 3.4: 3-second,
+                     // 10-metre runs. With a ridge along x you STEER across the
+                     // fall line and the rails convert the fall into traverse,
+                     // exactly like a snowboard: 6 s / 19 m pointing down it,
+                     // 33 s / 96 m holding a line across it.
+  duneRun: 3.0,      // slipface length in units of W
 };
 
 // A session is a SET: five waves, each bigger and faster-peeling than the last.
@@ -110,7 +122,7 @@ function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 function smooth(t) { return t * t * (3 - 2 * t); }
 
 /** Along-shore position of the breaking point at time t. The thing chasing you. */
-export function breakX(t) { return WAVE.peelSpeed * t; }
+export function breakX(t) { return WAVE.dune ? 0 : WAVE.peelSpeed * t; }
 
 /** Cross-shore slope of the crest line. Geometry: peel = celerity / crestSlope. */
 export function crestSlope() { return WAVE.c / WAVE.peelSpeed; }
@@ -121,6 +133,12 @@ export function crestSlope() { return WAVE.c / WAVE.peelSpeed; }
  * closing out all at once.
  */
 export function crestZ(x, t) {
+  // ⚠️ A DUNE DOES NOT TRAVEL. In dune mode the ridge line is a pure function of
+  // x with no t in it at all — that single missing term is the whole difference
+  // between surfing and sandboarding. Everything downstream (height, normals,
+  // surfaceAccel) inherits the staticness for free, which is why ∂h/∂t vanishes
+  // and gravity becomes the only engine.
+  if (WAVE.dune) return WAVE.duneTilt * x;
   return crestSlope() * (x - breakX(t));
 }
 
@@ -156,6 +174,10 @@ function faceAlong(b) {
 export function foamAt(x, z, t) {
   const b = breakLag(x, t);
   const u = (z - crestZ(x, t)) / WAVE.W;
+  // On a dune there is no whitewater; the hazard is the deep soft sand of the
+  // runout apron, which swallows speed and ends the run. Same field, same drag,
+  // same grace window — only the fiction changes.
+  if (WAVE.dune) return clamp01(smooth(clamp01((-u - WAVE.duneRun * 0.88) / 0.45)));
   // Broken along-shore. NOTE the onset is deliberately several metres BEHIND the
   // breaking point, not at it: the tube is the last stretch of clean water before
   // the wave collapses, so the barrel window (b ≈ 2–9) has to sit in front of this
@@ -189,6 +211,34 @@ export function height(x, z, t) {
   const b = breakX(t) - x;
   const amp = ampAlong(b);
   const u = (z - cz) / WAVE.W;
+
+  // ---- the dune ----------------------------------------------------------
+  // Not a wave: a standing landform. Flat crest plateau behind the lip, a
+  // slipface at roughly the angle of repose, then a flat runout apron at the
+  // bottom. Time appears only in the chop, so the surface is genuinely stagnant
+  // and every metre of speed you get is gravity you paid altitude for.
+  if (WAVE.dune) {
+    const run = WAVE.duneRun;
+    let hh;
+    if (u >= 0) hh = 1;                                   // the dune top
+    else if (u > -run) hh = smooth(clamp01(1 + u / run));  // the slipface
+    else hh = 0;                                          // the runout apron
+    // Rollers along the crest — a slipface is rippled, not a ramp, and these are
+    // what you launch off. Scaled by hh so the runout stays flat.
+    // Two scales of ripple: long dune-scale undulation, plus a ~20 m ripple with
+    // enough amplitude to actually collapse the surface support and launch you.
+    // Measured: below ~0.05·A at this wavelength nothing ever leaves the ground.
+    // Three scales, like a real dune: long undulation, medium rollers, and short
+    // megaripples that appear in PATCHES. The short scale is the only one that can
+    // actually launch you — measured, a 20 m roller at this amplitude leaves λ at
+    // 3.4 and nothing ever leaves the ground — and patching it keeps the ride from
+    // becoming constant chatter.
+    const patch = Math.max(0, Math.sin(x * 0.035 + 2.1));
+    const roll = Math.sin(x * 0.021 + 1.7) * 0.075
+               + Math.sin(x * 0.055) * 0.040
+               + Math.sin(x * 0.55 + 0.6) * 0.042 * patch;
+    return WAVE.A * hh * (1 + roll) + chop(x, z, t) * 0.6;
+  }
 
   // Skewed soliton: steep face shoreward of the crest, long gentle back seaward.
   const k = u >= 0 ? WAVE.backK : faceAlong(b);
@@ -290,6 +340,7 @@ export function surfaceAccel(x, z, vx, vz, t, out) {
  * and a small along-shore shove for sitting in the pocket.
  */
 export function water(x, z, t, out) {
+  if (WAVE.dune) { out.x = 0; out.z = 0; return out; }   // the ground is still
   const b = breakX(t) - x;
   const u = (z - crestZ(x, t)) / WAVE.W;
   const amp = ampAlong(b);
@@ -320,6 +371,7 @@ export function water(x, z, t, out) {
  * Returns 0..1: how deep inside the tube the point is.
  */
 export function barrelAt(x, y, z, t) {
+  if (WAVE.dune) return 0;      // sand does not throw a lip
   const b = breakX(t) - x;
   // The tube only exists in a window right at the break — a few metres of wave.
   const along = EXP(-(((b - 5.5) / 4.2) ** 2));
@@ -336,6 +388,15 @@ export function barrelAt(x, y, z, t) {
   const lipY = WAVE.A * ampAlong(b) * 0.86;
   const under = clamp01((lipY - y) / 2.0);
   return clamp01(along * depth * under * 1.25);
+}
+
+/**
+ * Altitude on a dune slipface: 1 at the crest lip, 0 in the runout apron.
+ * This is sand's equivalent of `lag` — the resource the whole element is about.
+ */
+export function duneAlt(x, z, t) {
+  const u = (z - crestZ(x, t)) / WAVE.W;
+  return clamp01(1 + u / WAVE.duneRun);
 }
 
 /** Height of the throwing lip above still water at along-shore x. Used to aim spray. */

@@ -36,12 +36,16 @@ export const ELEMENTS = {
 
   lava: {
     id: 'lava', name: 'LAVA', spray: 'EMBERS',
-    // Molten rock is slow and thick. You get committed, heavy turns and a top speed
-    // well down on water — and the crust that has already broken will not let go.
-    physics: { c: 6.4, boreSpeed: 4.2, orbitalK: 0.48, pocketPush: 1.8 },
-    tune: { dragPlane: 0.052, dragSlow: 0.070, gripMax: 19.0, slipDrag: 0.80,
+    // ⚠️ A VOLCANO FLANK, not a wave. Lava runs DOWNHILL — so this is a descent,
+    // like sand and snow, not a swell that travels toward you. Molten rock is slow
+    // and thick: committed heavy turns, a low top speed, and a chilled crust at the
+    // bottom of the flank that will not let go once it has you.
+    dune: true,
+    physics: { dune: 1, duneTilt: 0, duneRun: 2.6, chopAmp: 0.05,
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+    tune: { dragPlane: 0.050, dragSlow: 0.070, gripMax: 19.0, slipDrag: 0.80,
             foamGrace: 0.60, maxSpeed: 19 },
-    paceScale: 0.76,
+    ampScale: 2.6,
     pal: { deep: 0x1a0704, shallow: 0xc4400e, glow: 0xff9433, sky: 0x35180f,
            horizon: 0x6b2e15, sunCol: 0xffb066, foam: 0xffb35c, zenith: 0x0d0503, low: 0x4a1e0c },
     fog: 0x4a2416,
@@ -52,13 +56,18 @@ export const ELEMENTS = {
 
   sand: {
     id: 'sand', name: 'SAND', spray: 'DUST',
-    // A dune slipface avalanching. There is almost no forward push from the medium
-    // itself — gravity does nearly all of it — and the surface is LOOSE, so the
-    // rails break away early and everything is a drift.
-    physics: { c: 7.2, orbitalK: 0.30, boreSpeed: 4.0, pocketPush: 1.2, chopAmp: 0.06 },
-    tune: { dragPlane: 0.044, gripMax: 10.5, slipDrag: 0.34, foamGrace: 1.45,
+    // ⚠️ SAND IS NOT A WAVE. It is a STANDING DUNE and you ride DOWN it. The
+    // surface does not travel, nothing chases you, and gravity is the only engine
+    // — see the dune branch in wave.js. The resource is ALTITUDE: point down the
+    // fall line for speed and the runout arrives fast; traverse across the face to
+    // stay high and the run lasts. The surface is loose, so the rails break away
+    // early and everything is a drift.
+    dune: true,
+    physics: { dune: 1, duneTilt: 0, duneRun: 3.0, chopAmp: 0.05,
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+    tune: { dragPlane: 0.030, gripMax: 10.5, slipDrag: 0.34, foamGrace: 1.45,
             maxSpeed: 21 },
-    paceScale: 0.84,
+    ampScale: 3.2,     // dunes are LANDFORMS — tens of metres, not chest high
     pal: { deep: 0x6b4a24, shallow: 0xd9ad63, glow: 0xf2d191, sky: 0xc2ab80,
            horizon: 0xd8c39a, sunCol: 0xfff0cc, foam: 0xeedbb2, zenith: 0x8f9c9e, low: 0xd8c39a },
     fog: 0xd8c39a,
@@ -69,11 +78,15 @@ export const ELEMENTS = {
 
   snow: {
     id: 'snow', name: 'SNOW', spray: 'POWDER',
-    // An avalanche face. Almost frictionless and fast, and the edges bite hard, so
-    // this is the medium where a clean line is worth the most.
-    physics: { c: 11.4, orbitalK: 0.42, boreSpeed: 6.0, chopAmp: 0.08 },
-    tune: { dragPlane: 0.020, dragSlow: 0.030, gripMax: 21.0, slipDrag: 0.44,
+    // ⚠️ A MOUNTAIN FACE, not a wave. The longest and fastest descent in the game:
+    // near-frictionless, edges that bite hard, and a big vertical to spend. This is
+    // the medium where a clean line is worth the most.
+    dune: true,
+    physics: { dune: 1, duneTilt: 0, duneRun: 4.2, chopAmp: 0.07,
+               orbitalK: 0, boreSpeed: 0, pocketPush: 0 },
+    tune: { dragPlane: 0.018, dragSlow: 0.030, gripMax: 21.0, slipDrag: 0.44,
             foamGrace: 0.85, maxSpeed: 28 },
+    ampScale: 4.0,
     pal: { deep: 0x46617e, shallow: 0xd6e6f4, glow: 0xc4e4ff, sky: 0x9fbcd4,
            horizon: 0xdfe8ee, sunCol: 0xfff8e8, foam: 0xffffff, zenith: 0x2c465e, low: 0xdfe8ee },
     fog: 0xdfe8ee,
@@ -130,6 +143,10 @@ export function applyElement(el, breakParams = {}) {
   // per-medium: sustainable trim speed sets the peel ceiling, so a medium that
   // lowers one must lower the other.
   if (el.paceScale && p.peelSpeed) p.peelSpeed *= el.paceScale;
+  // A dune is a landform, not a swell: it wants to be tens of metres tall, but the
+  // break presets are sized for waves. Scale rather than override, so the
+  // break-to-break variation (a small dune field vs a big one) survives.
+  if (el.ampScale && p.A) p.A *= el.ampScale;
   applyWave(p);
   return el;
 }

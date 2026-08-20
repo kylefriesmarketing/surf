@@ -184,6 +184,7 @@ export class Ocean {
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
     this.geo = geo;
+    this._dune = false;
 
     // Everything past the playable band: flat, cheap, purely to fill the horizon.
     // It sits just BELOW the grid and shares the deep-water colour, with scene fog
@@ -231,6 +232,27 @@ export class Ocean {
     far.renderOrder = -5;
     scene.add(far);
     this.far = far;
+  }
+
+  /**
+   * Re-lay the rows for a LANDFORM instead of a wave.
+   *
+   * On a wave the interesting band is the face just shoreward of the crest, and
+   * everything behind you is spent water you never look at — hence rows spanning
+   * only 34 m downhill. On a dune, a mountain face or a volcano flank that same
+   * layout cuts the RUNOUT off 34 m below the rider and draws a hard grid edge
+   * across the middle of the descent, which is exactly the part you are riding
+   * toward. Descents therefore reach far downhill and give up the plateau behind,
+   * which is flat and hides its own far side anyway.
+   *
+   * ⚠️ Only the sampling changes. Heights still come from wave.js, so this cannot
+   * move the rider or the sim — it decides where the view takes its samples.
+   */
+  setDune(on) {
+    if (this._dune === on) return;
+    this._dune = on;
+    this.rz = on ? axis(this.rows, -210, 52, -22, 1.9)
+                 : axis(this.rows, -34, 115, -5, 2.3);
   }
 
   update(t, riderX, cam) {
@@ -667,10 +689,34 @@ export function createRig(scene) {
       torsoG.rotation.set(.16 + crouch * .40, -.50 + lean * .22, -lean * .48);
       headG.rotation.set(-(.14 + crouch * .38) * .7, .46 - lean * .12, lean * .14);
 
-      armL.sh.rotation.set(-lean * .85 + crouch * .22, 0, .72 + Math.abs(lean) * .38 + crouch * .18);
-      armR.sh.rotation.set(lean * .85 + crouch * .28, 0, -.78 - Math.abs(lean) * .42 - crouch * .18);
-      armL.el.rotation.set(-.30 - crouch * .28, 0, .06);
-      armR.el.rotation.set(-.34 - crouch * .28, 0, -.06);
+      // ⚠️ SIGN TRAP, and it shipped wrong: an arm hangs down (0,−1,0), and Euler
+      // 'XYZ' applies z FIRST, so a POSITIVE z-rotation swings the hand toward +x.
+      // The left shoulder sits at −x, so it needs a NEGATIVE z to reach outboard.
+      // Both arms had it inverted, so both swung inward and the figure surfed with
+      // its arms folded and twisted across its chest (Kyle's report): at the old
+      // z of ±0.72 each hand reached ~14 cm PAST the centreline onto the far side
+      // of the sternum. `spread` is therefore mirrored, never shared.
+      // ⚠️ Verify this in TORSO space, not world space — world x is meaningless
+      // here because the rider banks and turns, and measuring there showed the
+      // arms swapping sides on every carve when nothing was wrong.
+      const spread = .70 + crouch * .16 + Math.abs(lean) * .14;
+      // The torso banks its own shoulder line by −lean*.48. `tilt` gives that back
+      // about 60%, so the arms stay closer to level with the horizon while the
+      // chest rolls — which is what a surfer's arms actually do in a hard carve.
+      // It is a partial CANCELLATION, so it carries the torso's sign flipped and is
+      // added to BOTH arms: the pair counter-rotates as a unit rather than one arm
+      // opening while the other closes.
+      // ⚠️ Keep the coefficient well under the base spread. That is the property
+      // that guarantees neither z-rotation can reach zero at full lean, and zero is
+      // where an arm would swing back through the body.
+      const tilt = lean * .30;
+      // armR is the LEAD arm — the torso's −0.50 y-turn carries the +x shoulder
+      // toward the nose, so it reaches forward down the line while armL trails
+      // low and behind as the counterweight.
+      armR.sh.rotation.set(-.50 - lean * .32 - crouch * .12, -.18, spread + tilt);
+      armL.sh.rotation.set(.26 - lean * .26 + crouch * .10, -.22, -spread + .06 + tilt);
+      armR.el.rotation.set(-.58 - crouch * .16, 0, .10);
+      armL.el.rotation.set(-.40 - crouch * .14, 0, -.10);
 
       solveLeg(legF, -.085, FOOT_F);
       solveLeg(legB, .085, FOOT_B);
@@ -697,8 +743,11 @@ export function createRig(scene) {
 
       // The crawl: shoulders windmill in anti-phase, elbows soften on recovery.
       const s = Math.sin(ph * 7), c = Math.cos(ph * 7);
-      armL.sh.rotation.set(1.35 + s * .80, 0, .30);
-      armR.sh.rotation.set(1.35 - s * .80, 0, -.30);
+      // Mirrored outward splay (the sign rule again — armL at −x takes negative
+      // z), so the stroke recovers wide of the shoulders instead of pinching in
+      // over the spine.
+      armL.sh.rotation.set(1.35 + s * .80, 0, -.24);
+      armR.sh.rotation.set(1.35 - s * .80, 0, .24);
       armL.el.rotation.set(-.48 - Math.max(0, c) * .5, 0, 0);
       armR.el.rotation.set(-.48 - Math.max(0, -c) * .5, 0, 0);
     },
@@ -737,14 +786,18 @@ export function createRig(scene) {
       torsoG.rotation.y = mix(torsoG.rotation.y, -.50 + tw);
       headG.rotation.x = mix(headG.rotation.x, .18);      // eyes on the landing
 
-      // Lead arm reaches down toward the rail (the grab), trail arm swings high
-      // for balance; both widen out as the landing comes up.
-      armL.sh.rotation.x = mix(armL.sh.rotation.x, .70 + grab * .35 - ext * .55);
-      armL.sh.rotation.z = mix(armL.sh.rotation.z, .18 - grab * .10 + ext * .75);
-      armL.el.rotation.x = mix(armL.el.rotation.x, -.95 - grab * .30 + ext * .60);
-      armR.sh.rotation.x = mix(armR.sh.rotation.x, -.55 + ext * .35);
-      armR.sh.rotation.z = mix(armR.sh.rotation.z, -1.45 + ext * .45);
-      armR.el.rotation.x = mix(armR.el.rotation.x, -.18);
+      // ⚠️ Same mirrored-sign rule as the stance (see pose()): armL is at −x and
+      // needs NEGATIVE z to stay outboard. The air pose had it inverted too, so
+      // both arms wrapped across the chest through every flight.
+      // A grab is a BACK-hand move: the trail arm (armL) drops to the rail — the
+      // one time crossing toward the centreline is right — while the lead arm
+      // (armR) stays up and out holding the balance. Extension flings both wide.
+      armL.sh.rotation.x = mix(armL.sh.rotation.x, .10 + grab * .55 - ext * .45);
+      armL.sh.rotation.z = mix(armL.sh.rotation.z, -.70 + grab * .48 - ext * .55);
+      armL.el.rotation.x = mix(armL.el.rotation.x, -.55 - grab * .85 + ext * .35);
+      armR.sh.rotation.x = mix(armR.sh.rotation.x, -.60 - ext * .35);
+      armR.sh.rotation.z = mix(armR.sh.rotation.z, .95 + ext * .55);
+      armR.el.rotation.x = mix(armR.el.rotation.x, -.40 + ext * .20);
 
       // Feet stay on the deck — the board hangs from them, which is why the
       // compression reads as the board tucking up under the rider.

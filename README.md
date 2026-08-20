@@ -61,9 +61,119 @@ soft-shadowed rider and board, physical spray, and a procedural atmospheric sky.
 | Audio (WebAudio synth, no files) | done, **not yet heard by a human** |
 | Touch controls | written, **untested on a real device** |
 
-**Not done / next:** paddling out / wave selection (waves are handed to you in
-order), a real wipeout animation, tuning the audio by ear, mobile testing,
-deployment to GitHub Pages.
+**Not done / next:** tuning the audio by ear, mobile testing, and authored jump
+features on the three descents (see M9 — the rollers cannot collapse λ far enough
+to launch). Wave selection shipped in M6, the wipeout tumble in M5, and the game
+is live on GitHub Pages.
+
+### M9 — the geography is honest now: three of the five media are LANDFORMS (2026-08-19)
+
+Kyle: *"sand should be stagnant dunes you ride down"*, then *"snow will be on a
+mountain and lava down a volcano — everything should make sense and match the
+theme and geography of where it would be in the real world."* He was right, and
+the old build was incoherent: sand, snow and lava were the water wave with a new
+palette, so a **dune was travelling toward you at 11 m/s** and lava was rolling
+uphill in sets.
+
+**The world model, and it is worth stating plainly:**
+
+| medium | what it is | moves? | the resource |
+|---|---|---|---|
+| water | an ocean swell | travels toward you | the pocket — stay with the break |
+| cosmic | a standing wave in not-quite-matter | travels | the same, in low gravity |
+| **sand** | a desert **dune** | **stands still** | **altitude** |
+| **snow** | a **mountain** face | **stands still** | **altitude** |
+| **lava** | a **volcano** flank | **stands still** | **altitude** |
+
+A descent is a different game from a wave, and the numbers say so — measured
+live, holding one heading across the fall line:
+
+| medium | world | run | distance | top speed |
+|---|---|---|---|---|
+| water | home break | 6.3 s | 44 m | 36 km/h |
+| cosmic | the void | 7.3 s | 49 m | 38 km/h |
+| sand | dunes | 13.8 s | 74 m | 23 km/h |
+| snow | peaks | 16.0 s | 106 m | 29 km/h |
+| lava | volcano | 14.6 s | 57 m | 18 km/h |
+
+Waves are short, fast and chase you. Descents are long, are steered rather than
+chased, and end when you run out of hill. Snow is the longest and fastest of the
+three (a big vertical, edges that bite, almost no friction); lava is the slowest
+and shortest (thick, heavy, and the crust at the base will not let go).
+
+**How it works.** `WAVE.dune` switches four pure functions in `wave.js`:
+- `crestZ(x, t)` **drops its `t` term**. That single missing term is the whole
+  difference between surfing and sandboarding.
+- `breakX(t)` returns 0 — nothing sweeps along a dune.
+- `height()` takes a landform branch: a flat top, a `duneRun`-long slipface, then
+  a runout apron at zero, with megaripples rolling across the face.
+- `barrelAt()` returns 0 and `water()` returns no current: a dune throws no lip
+  and has no flow.
+
+`board.js` derives `alt` (1 at the lip, 0 at the runout) via the new
+`duneAlt()`, and maps it onto the existing `lag`/`pocket` fields so the HUD gauge
+and every downstream system keep working unchanged.
+
+**The gauge needed new words, not new code.** The pip still reads left-to-right,
+but "POCKET" and "TUBE" are nonsense on a hillside, so each medium names its own
+bands: sand CREST/FACE/STEEPS/RUNOUT, snow RIDGE/FALL LINE/STEEPS/FLATS, lava
+RIM/FLANK/STEEPS/CRUST. Wipeouts too — you are not "caught inside" on a dune,
+you are BOGGED DOWN / RAN OUT OF MOUNTAIN / STUCK IN THE CRUST.
+
+**⚠️ `duneTilt` stays 0.** A tilted crest line was tried at 3.4 to give descents
+some of the peel-like diagonal a wave has. It gives 3-second, 10-metre runs,
+because the resulting ridge runs mostly along +z and the rider falls off the end
+of it immediately. The comment sits on the constant; do not re-tilt it without
+re-measuring run length.
+
+**⚠️ Descents produce no airs, and that is not a bug to chase blindly.** Measured
+minimum λ on the rollers is ~5 against a `launchLambda` of 0.9 — the face never
+falls away faster than the rider can follow. Getting airs would need λ ≤ 0.9,
+i.e. `hxx·ẋ² < −8.3`, which at realistic speeds means megaripples about a 7 m
+wavelength and 0.7 m amplitude: a face that is visibly corrugated. Authored
+individual lips would be the right answer, not louder ripples. The airs on water
+are unaffected.
+
+**⚠️ The view grid had to be re-laid, and the old layout drew a cliff through
+the middle of every descent.** `Ocean` crowds rows on the wave face and reaches
+only 34 m *behind* the rider, because on a wave that is spent water. On a
+landform that is the RUNOUT — the part you are riding toward — so the grid edge
+appeared as a hard step across the slope. `ocean.setDune(on)` re-lays the rows to
+reach 210 m downhill and gives up the plateau behind. Sampling only; heights
+still come from `wave.js`, so it cannot move the rider.
+
+**⚠️ The old element test passed VACUOUSLY on dunes.** `breakPolicy` steers by
+lag, and its clamp made the "safe" and "greedy" targets identical once lag was
+derived from altitude — so both ran the same line and the greed assertion proved
+nothing. The elements group now branches: waves keep safe-survives/greedy-wipes,
+descents assert that the fall line is *shorter and faster* than the traverse. A
+new `geography: the landforms stand still` group pins the actual invariant —
+zero crest travel and zero height drift over 5 s for the three descents, real
+travel for the two waves. 138 tests green.
+
+### M9.1 — the arms were folded across his chest (2026-08-19)
+
+Kyle: *"the character looks much better but his arms are crossed and twisted
+across his body rather than at his sides or out for balance."* One sign error,
+in three places.
+
+An arm hangs down `(0, −1, 0)`, and THREE's Euler `'XYZ'` applies **z first**, so
+a POSITIVE `sh.rotation.z` swings the hand toward **+x**. The left shoulder sits
+at −x, so it needs a **NEGATIVE** z to reach outboard. Both arms had it inverted,
+in the riding stance, the air pose and the paddle crawl — at the old ±0.72 each
+hand reached about 14 cm PAST the centreline, onto the far side of the sternum.
+
+Now mirrored properly, and `armR` is the **lead** arm (the torso's −0.50 y-turn
+carries the +x shoulder toward the nose): it reaches forward down the line at
+shoulder height while `armL` trails low and out as the counterweight. Measured in
+torso space: lead hand (0.55, 0.41, 0.28), trail hand (−0.43, 0.00, 0.04) —
+hands 25–43 cm outboard of their own shoulders in every stance.
+
+`tilt = lean * .30` gives back ~60% of the torso's own `−lean * .48` bank, so the
+arms stay closer to level with the horizon through a carve. **⚠️ Keep its
+coefficient well under `spread`** — that is the property guaranteeing neither
+z-rotation can reach zero at full lean, and zero is where an arm swings back
+through the body.
 
 ### M8.1 — the horizon, the sky, and the background (2026-08-18)
 The white band that ran across every horizon since M1 is dead, and the cause was
@@ -422,6 +532,27 @@ The grid is built in wave-aligned coordinates (each column's z samples are centr
     script must locate an insertion point, use `lastIndexOf`, not `indexOf` — the
     first `console.log(` in the test file lives *inside* the assertion helper.
 
+17. **Judge a limb in the frame that limb lives in.** Chasing the crossed-arms bug,
+    the hands were measured in world space, where the answer was gibberish — the
+    rider banks and turns, so world x stops meaning "the rider's left" the moment
+    a carve starts, and the arms appeared to swap sides on every turn when nothing
+    was wrong. It sent two fixes in the wrong direction. **Measure in TORSO space**,
+    where the shoulders sit at x = ±0.175 by construction and the chest centreline
+    is exactly x = 0. Same rule for feet (board space) and for the board (world).
+
+18. **`beginSession()` only opens the LINEUP; it does not start a wave.** Calling
+    it alone leaves the previous run's dead rider on the board and the previous
+    world dressing on the horizon, which looks exactly like the new element failed
+    to load. Taking an offer is what starts a wave — that is what `__surfPlay`
+    does, and it is the only way to reach lava/sand/snow/cosmic from a test
+    (`beginSession` forces water for tour and contest).
+
+19. **The shot receiver takes `<outdir>` THEN `<port>`.** Reversed, `OUT` becomes
+    `"8399"` and `PORT` parses to NaN, which throws `ERR_SOCKET_BAD_PORT`. And if
+    another session already holds 8399, `__surfShot` reports success while the PNG
+    lands in *that* session's scratchpad — read the full path it returns rather
+    than assuming your own directory.
+
 ---
 
 ## Debug handles
@@ -431,6 +562,7 @@ __surf()                       // { t, rider, run, session, trickState, fx, ocea
 __surfStep(n, dt, input)       // drive n frames by hand; input null = read the keyboard
 __surfAuto(wantLag)            // the cascade autopilot the tests fly (see below)
 __surfWave(i)                  // jump straight to wave i of the set
+__surfPlay(breakId, element)   // start a free surf directly — the only route to a non-water medium
 __surfShot(name, w, h, camFn)  // photograph the page → :8399 → a PNG you can Read
 __surfRestart()                // next wave if one is waiting, else a fresh set
 ```

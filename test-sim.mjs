@@ -669,35 +669,60 @@ group('rider: airs are landable');
 }
 
 
+
+// A descent is steered, not chased: hold a heading across the fall line and the
+// rails convert the fall into traverse. `hold` is that heading — near 0 is a long
+// slow traverse, steeply negative points down the fall line for speed.
+function dunePolicy(hold) {
+  return (t, r) => ({
+    carve: Math.max(-1, Math.min(1, (hold - r.heading) * 3)),
+    pump: 0, tuck: 0,
+  });
+}
+
 group('elements: every medium is rideable');
 {
-  // An element moves real physics (grip, drag, gravity, pace), and any of those can
-  // quietly make a medium unsurfable — lava and sand shipped their first draft
-  // unrideable on 6 of 8 probed break waves, because a heavy medium caps the rider
-  // below the break's peel speed. paceScale is the fix, and this is its guard.
+  // WATER and COSMIC are travelling waves — they chase you, and greed means
+  // sitting too deep. SAND, SNOW and LAVA are LANDFORMS you descend: nothing
+  // chases you, and greed means spending altitude too fast. Two different games,
+  // so two different assertions; asserting the wave rules on a dune passes
+  // vacuously because the policy's clamp makes every target identical.
   const tuneBefore = E.elementDefaults();
   const waveBefore = W.waveDefaults();
   let broken = [];
+
   for (const el of E.LIST) {
     for (const [bid, wi] of [['home', 1], ['home', 4], ['shelf', 2], ['outer', 2]]) {
       E.applyElement(el, B.waveParams(bid, wi));
-      const safe = ride(7200, breakPolicy(() => -14));
-      const greedy = ride(7200, breakPolicy(() => 9));
-      if (safe.r.down || safe.log.dist < 200 || !greedy.r.down) {
-        broken.push(`${el.id}@${bid}${wi}: safe=${safe.log.dist.toFixed(0)}m/${safe.r.downReason || 'ok'} greedy=${greedy.r.downReason || 'ALIVE'}`);
+      const label = `${el.id}@${bid}${wi}`;
+      if (el.dune) {
+        const shallow = ride(14000, dunePolicy(-0.18));
+        const steep = ride(14000, dunePolicy(-0.8));
+        if (shallow.log.dist < 40) broken.push(`${label}: traverse only ${shallow.log.dist.toFixed(0)}m`);
+        if (steep.log.dist >= shallow.log.dist) {
+          broken.push(`${label}: the fall line (${steep.log.dist.toFixed(0)}m) is not shorter than the traverse (${shallow.log.dist.toFixed(0)}m)`);
+        }
+        if (steep.log.maxSpeed <= shallow.log.maxSpeed) {
+          broken.push(`${label}: the fall line is not faster`);
+        }
+      } else {
+        const safe = ride(7200, breakPolicy(() => -14));
+        const greedy = ride(7200, breakPolicy(() => 9));
+        if (safe.r.down || safe.log.dist < 200 || !greedy.r.down) {
+          broken.push(`${label}: safe=${safe.log.dist.toFixed(0)}m/${safe.r.downReason || 'ok'} greedy=${greedy.r.downReason || 'ALIVE'}`);
+        }
       }
     }
   }
   ok('all five media are rideable on all probed breaks', broken.length === 0, broken.join(' | '));
 
-  // Identity: the media must PLAY differently, or they are palette swaps that cost
-  // five physics profiles of maintenance. Measure each on the same break wave.
+  // Identity: the media must PLAY differently, or they are palette swaps.
   const probe = {};
   for (const el of E.LIST) {
     E.applyElement(el, B.waveParams('home', 3));
-    const r = ride(7200, breakPolicy(() => -12));
+    const r = el.dune ? ride(14000, dunePolicy(-0.35))
+                      : ride(7200, breakPolicy(() => -12));
     let airT = 0;
-    // A second run that hunts airs: hold high, pop at the lip.
     E.applyElement(el, B.waveParams('home', 3));
     {
       const t0 = 4, x = W.breakX(t0) - 2;
@@ -714,21 +739,43 @@ group('elements: every medium is rideable');
     }
     probe[el.id] = { speed: r.log.maxSpeed, dist: r.log.dist, airT };
   }
-  ok('snow is faster than water', probe.snow.speed > probe.water.speed,
-     `snow=${probe.snow.speed.toFixed(1)} water=${probe.water.speed.toFixed(1)}`);
+  ok('snow is the fastest descent', probe.snow.speed > probe.sand.speed && probe.snow.speed > probe.lava.speed,
+     JSON.stringify(Object.fromEntries(E.LIST.map((e) => [e.id, +probe[e.id].speed.toFixed(1)]))));
   ok('lava is the slowest medium', probe.lava.speed === Math.min(...E.LIST.map((e) => probe[e.id].speed)),
      JSON.stringify(Object.fromEntries(E.LIST.map((e) => [e.id, +probe[e.id].speed.toFixed(1)]))));
   ok('cosmic hangs in the air longest — that is its whole identity',
      probe.cosmic.airT === Math.max(...E.LIST.map((e) => probe[e.id].airT)),
      JSON.stringify(Object.fromEntries(E.LIST.map((e) => [e.id, +probe[e.id].airT.toFixed(2)]))));
 
-  // No residue: leaving an element must restore both the board and the wave.
   E.applyElement(E.byId('water'), {});
   ok('water restores the rider tuning exactly',
      JSON.stringify(TUNE) === JSON.stringify(tuneBefore),
      'TUNE drifted after an element round-trip');
   W.applyWave(waveBefore);
   ok('and the wave is back to defaults', WAVE.A === waveBefore.A && WAVE.c === waveBefore.c);
+}
+
+group('geography: the landforms stand still');
+{
+  // The whole point of the correction: water and cosmic TRAVEL toward you; sand,
+  // snow and lava are places you descend. A landform whose surface moves in time
+  // is a wave wearing a costume.
+  const before = W.waveDefaults();
+  for (const el of E.LIST) {
+    E.applyElement(el, B.waveParams('home', 2));
+    const x = 30, z = W.crestZ(x, 4) - 10;
+    const drift = Math.abs(W.height(x, z, 4.0) - W.height(x, z, 9.0));
+    const crestMoved = Math.abs(W.crestZ(x, 4.0) - W.crestZ(x, 9.0));
+    if (el.dune) {
+      ok(`${el.id}: the ground does not travel`, crestMoved === 0 && drift < 0.9,
+         `crestMoved=${crestMoved.toFixed(2)} heightDrift=${drift.toFixed(2)}`);
+      ok(`${el.id}: nothing sweeps along it`, W.breakX(4) === 0 && W.breakX(99) === 0);
+      ok(`${el.id}: it throws no lip`, W.barrelAt(x, 1, z, 4) === 0);
+    } else {
+      ok(`${el.id}: the swell travels`, crestMoved > 5, `${crestMoved.toFixed(1)}m in 5s`);
+    }
+  }
+  W.applyWave(before);
 }
 
 

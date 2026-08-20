@@ -299,6 +299,9 @@ function startWave(i, offer) {
     paddleT: 1.3,
   };
   world.setBreak(elementId === 'water' ? breakId : E.byId(elementId).world);
+  // Sand, snow and lava are landforms you descend, so the view has to reach down
+  // the runout rather than crowd the face of a passing swell.
+  ocean.setDune(!!E.byId(elementId).dune);
 
   run.offer = offer || null;
   run.rec = null;
@@ -660,8 +663,21 @@ function updateHUD(dt) {
   const pos = Math.max(0, Math.min(1, (lag + 30) / 45));
   el('pip').style.left = (pos * 100) + '%';
   const zone = lag > 8 ? 'foam' : lag > 1 ? 'tube' : lag > -12 ? 'pocket' : 'shoulder';
-  const FOAM_WORD = { water: 'FOAM', lava: 'CRUST', sand: 'SLIDE', snow: 'DEBRIS', cosmic: 'COLLAPSE' };
-  el('zone').textContent = zone === 'foam' ? (FOAM_WORD[elementId] || 'FOAM') : zone.toUpperCase();
+  // A wave has a pocket and a tube; a dune has neither. On the three DESCENTS the
+  // same gauge reads ALTITUDE instead of lag (board.js derives lag from height on a
+  // dune), so the bands still mean something — they just need the landform's own
+  // words. Order matches the cascade above: shoulder, pocket, tube, foam.
+  const ZONE_WORDS = {
+    water:  ['SHOULDER', 'POCKET', 'TUBE', 'FOAM'],
+    cosmic: ['SHOULDER', 'POCKET', 'TUBE', 'COLLAPSE'],
+    sand:   ['CREST', 'FACE', 'STEEPS', 'RUNOUT'],
+    snow:   ['RIDGE', 'FALL LINE', 'STEEPS', 'FLATS'],
+    lava:   ['RIM', 'FLANK', 'STEEPS', 'CRUST'],
+  };
+  const words = ZONE_WORDS[elementId] || ZONE_WORDS.water;
+  el('zone').textContent = words[['shoulder', 'pocket', 'tube', 'foam'].indexOf(zone)];
+  // The CSS class stays the wave's name — it only carries the danger colour, and
+  // "foam" is red wherever you are.
   el('zone').className = zone;
 
   el('msg').textContent = run.msgT > 0 ? run.msg : '';
@@ -755,7 +771,10 @@ function frame(dt, override) {
   if (agg.wiped) {
     fx.splash(rider.p.x, rider.p.y, rider.p.z, 14);
     SFX.hit('splash', 12);
-    finish(agg.wiped === 'foam' ? 'CAUGHT INSIDE'
+    // Nothing "catches you inside" on a dune — you simply run out of hill. Same
+    // rule firing, honest name for it.
+    const DEAD_END = { sand: 'BOGGED DOWN', snow: 'RAN OUT OF MOUNTAIN', lava: 'STUCK IN THE CRUST' };
+    finish(agg.wiped === 'foam' ? (DEAD_END[elementId] || 'CAUGHT INSIDE')
          : agg.wiped === 'pearl' ? 'PEARLED' : 'BLEW THE LANDING');
   }
 
@@ -909,6 +928,21 @@ window.__surf = () => ({ t, rider, run, session, trickState, career, mode, heat,
                          breakId, screens, ui, world, fx, ocean, curl,
                          renderer, scene, camera, THREE });
 window.__surfRestart = restart;
+
+/**
+ * Start a free-surf session directly, skipping the menus. The element only takes
+ * effect in free mode (beginSession forces water for tour and contest), so this is
+ * the only way to reach lava, sand, snow or cosmic from a test.
+ * ⚠️ beginSession only opens the LINEUP — it does not drop you in, so calling it
+ * alone leaves the previous run's dead rider on screen and looks like the element
+ * failed to load. Taking an offer is what actually starts a wave.
+ */
+window.__surfPlay = (breakId_ = 'home', element = 'water', offer = 0) => {
+  beginSession('free', { breakId: breakId_, element });
+  ui.hide();
+  startWave(0, buildOffers()[offer]);
+  return { element: elementId, world: world.current, wave: W.SET[0] && W.SET[0].name };
+};
 
 /**
  * The autopilot: the same cascade controller test-sim.mjs flies. Lag error picks a
